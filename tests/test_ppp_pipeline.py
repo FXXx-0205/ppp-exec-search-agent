@@ -92,6 +92,7 @@ def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
         output_path=str(output_path),
         role_spec_path=str(role_spec_path),
         model="claude-sonnet-4-5",
+        intermediate_dir=str(tmp_path / "intermediate"),
     )
 
     assert output_path.exists()
@@ -344,6 +345,7 @@ def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monke
         output_path=str(output_path),
         role_spec_path=str(role_spec_path),
         model="claude-sonnet-4-5",
+        intermediate_dir=str(tmp_path / "intermediate"),
     )
 
     assert call_counter["count"] == 6

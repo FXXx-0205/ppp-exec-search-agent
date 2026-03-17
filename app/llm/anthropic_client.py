@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from app.config import settings
 from app.core.metrics import observe_llm_call
@@ -67,8 +67,9 @@ class ClaudeClient:
             return self._mock(system_prompt=system_prompt, user_prompt=user_prompt)
         parts: list[str] = []
         for block in resp.content:
-            if getattr(block, "type", None) == "text":
-                parts.append(block.text)
+            block_obj = cast(Any, block)
+            if getattr(block_obj, "type", None) == "text":
+                parts.append(str(getattr(block_obj, "text", "")))
         observe_llm_call(
             round((time.perf_counter() - started_at) * 1000, 2),
             used_fallback=False,
@@ -111,31 +112,35 @@ class ClaudeClient:
 
         try:
             for _ in range(max_rounds):
-                resp = self._client.messages.create(messages=messages, **kwargs)
+                resp = self._client.messages.create(messages=cast(Any, messages), **kwargs)
                 assistant_content: list[dict[str, Any]] = []
                 tool_results: list[dict[str, Any]] = []
                 text_parts: list[str] = []
 
                 for block in resp.content:
-                    block_type = getattr(block, "type", None)
+                    block_obj = cast(Any, block)
+                    block_type = getattr(block_obj, "type", None)
                     if block_type == "text":
-                        assistant_content.append({"type": "text", "text": block.text})
-                        text_parts.append(block.text)
+                        text_value = str(getattr(block_obj, "text", ""))
+                        assistant_content.append({"type": "text", "text": text_value})
+                        text_parts.append(text_value)
                     elif block_type == "tool_use":
-                        tool_input = dict(getattr(block, "input", {}) or {})
+                        tool_input = dict(getattr(block_obj, "input", {}) or {})
+                        tool_id = str(getattr(block_obj, "id", ""))
+                        tool_name = str(getattr(block_obj, "name", ""))
                         assistant_content.append(
                             {
                                 "type": "tool_use",
-                                "id": block.id,
-                                "name": block.name,
+                                "id": tool_id,
+                                "name": tool_name,
                                 "input": tool_input,
                             }
                         )
                         tool_results.append(
                             {
                                 "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": tool_handler(block.name, tool_input),
+                                "tool_use_id": tool_id,
+                                "content": tool_handler(tool_name, tool_input),
                             }
                         )
 
