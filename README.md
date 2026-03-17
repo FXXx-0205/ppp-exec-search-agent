@@ -1,17 +1,35 @@
-# exec-search-ai-workflow
+# PPP AI Assessment Submission
 
-AI workflow system for executive search teams, designed around a real search mandate rather than a chat interface.
+Claude-powered candidate briefing agent for executive search, built for the Platinum Pacific Partners AI & Automation Intern task.
 
-## PPP Task Mode
+This submission focuses on a real PPP-style workflow: take a `candidates.csv`, enrich each profile with structured public-research evidence, generate recruiter-usable candidate briefings in strict JSON, and run a final QA layer before submission.
 
-This branch also includes a dedicated PPP assessment runner built on top of the existing repository. It provides:
+## What It Does
 
-- a CLI entrypoint for `candidates.csv -> output.json`
-- a lightweight Streamlit runner for non-technical usage
-- default PPP task input files under `data/ppp/`
-- a fixture-backed `candidate_public_profile_lookup` enrichment tool with intermediate artifacts
+- Accepts the PPP candidate CSV input format with exactly 5 rows.
+- Runs a two-stage pipeline:
+  1. `candidate_public_profile_lookup` enrichment
+  2. Claude-based structured briefing generation
+- Produces `output.json` matching the required schema.
+- Saves intermediate enrichment artifacts for review and debugging.
+- Runs schema, content, and business-rule QA before treating the output as complete.
 
-### Fastest way to run the PPP task
+## Quick Start
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Set:
+
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+```
+
+## Example Command
 
 ```bash
 python3 scripts/run_ppp_task.py \
@@ -23,32 +41,13 @@ python3 scripts/run_ppp_task.py \
   --model claude-sonnet-4-5
 ```
 
-You can also use the positional shorthand:
-
-```bash
-python3 scripts/run_ppp_task.py data/ppp/candidates.csv
-```
-
-Required environment variable:
-
-```bash
-export ANTHROPIC_API_KEY=your_key_here
-```
-
-Optional Streamlit runner:
+Optional non-technical runner:
 
 ```bash
 streamlit run app/ui/ppp_task_app.py
 ```
 
-The PPP path now uses a two-stage flow:
-
-1. `candidate_public_profile_lookup` collects controlled public-research evidence, tenure clues, firm/AUM context clues, source labels, and confidence notes.
-2. Claude generates the final schema-constrained candidate briefing from that enrichment payload.
-
-Intermediate enrichment artifacts are written to `data/ppp/intermediate/candidate_*.json` for debugging and review.
-
-One-click validation before submission:
+Pre-submission validation:
 
 ```bash
 python3 scripts/run_ppp_task.py \
@@ -58,198 +57,102 @@ python3 scripts/run_ppp_task.py \
   --validate-only
 ```
 
-This writes `data/ppp/intermediate/qa_report.json` and fails if schema, content, or business-rule QA checks do not pass.
+## Output Format
 
-This project turns a search process into a structured workflow:
+Primary deliverable:
 
-- role intake
-- candidate search
-- market mapping
-- explainable ranking
-- brief generation
-- approval and export
-- audit trail
+- `data/ppp/output.json`
 
-The goal is not to produce a single prompt response. It is to make candidate research and briefing more structured, reviewable, and repeatable inside a boutique professional services workflow.
+Intermediate artifacts:
 
-## Why I Built It
+- `data/ppp/intermediate/candidate_1_enriched.json` to `candidate_5_enriched.json`
+- `data/ppp/intermediate/qa_report.json`
+- `data/ppp/intermediate/candidate_*_error.json` on candidate-level failure
 
-I built this as a practical internal operating layer for executive search, especially for firms working in regulated, relationship-driven sectors like funds management and financial services.
+The final JSON contains:
 
-The project is meant to show how AI can support actual search work:
+- `candidate_id`
+- `full_name`
+- `current_role`
+- `career_narrative`
+- `experience_tags`
+- `firm_aum_context`
+- `mobility_signal`
+- `role_fit`
+- `outreach_hook`
 
-- turning an unstructured mandate into a reusable project
-- reusing an internal candidate pool before jumping to broad sourcing
-- making ranking explainable instead of black-box
-- generating a client-facing brief with review and approval steps
-- preserving version history, export history, and audit visibility
+## Architecture Overview
 
-## What The System Does
+The pipeline uses a two-stage pattern because it is more reliable than asking one prompt to both research and format:
 
-- **Project-centric workflow**
-  Every mandate is tracked as a project with runs, snapshots, brief versions, approvals, and audit history.
-- **Role intake and retrieval**
-  A raw JD or client brief is parsed into a structured role spec, then grounded with firm and market context via retrieval.
-- **Candidate search and review**
-  The system searches a demo/internal candidate pool, supports filtering, and surfaces candidate detail for researcher review.
-- **Market map view**
-  A lightweight market-mapping layer shows which firms appear in the pool and what institutional context is relevant to the mandate.
-- **Explainable ranking**
-  Candidates receive calibrated fit scores plus structured reasons, evidence, risks, missing information, and dimension-level match logic.
-- **Briefing and approval**
-  Ranked results can be turned into a markdown brief, submitted for approval, revised, approved, rejected, and exported.
-- **Audit and reviewability**
-  Key workflow events are stored and exposed through a reviewer console so a team can inspect what happened and when.
+1. **Enrichment / tool stage**
+   The system gathers structured evidence for each candidate: verified snippets, tenure clues, channel indicators, firm context, missing fields, uncertain fields, sources, and confidence notes.
+2. **Structured generation stage**
+   Claude receives the candidate input, enrichment payload, role spec, and strict output requirements, then returns a single candidate JSON object.
+3. **Validation and QA stage**
+   The system repairs minor formatting issues, validates the schema with Pydantic, and runs content and business-rule checks before accepting the bundle.
 
-## Why It Fits A Firm Like PPP
+This makes the output more robust, auditable, and recruiter-usable.
 
-- It is designed around executive search workflow rather than generic chat.
-- It reflects the realities of a lean boutique team: quick review, clear handoffs, and visible process state.
-- It treats approval, revision, and audit as first-class product features rather than afterthoughts.
-- It is practical to demo, extend, and connect to internal tools over time.
+## Tool Design
 
-## Demo Surfaces
+Implemented tool:
 
-- **Guided Streamlit UI**
-  A 4-step flow for role intake, candidate search, market mapping, and brief creation.
-- **Reviewer Console**
-  A lightweight internal console for project summary, snapshots, brief versions, approval actions, export artifact viewing, and audit timeline.
-- **FastAPI backend**
-  Project, search, ranking, brief, audit, and review endpoints.
+- `candidate_public_profile_lookup`
 
-## Core Stack
+Input:
 
-- Python, FastAPI, Pydantic
-- Anthropic Claude API (`anthropic` SDK) with mock fallback mode
-- ChromaDB for retrieval with in-memory fallback
-- Streamlit for internal demo and review surfaces
+- `full_name`
+- `current_employer`
+- `current_title`
+- `linkedin_url`
 
-## Quickstart
+Output:
 
-### Local setup
+- verified public snippets
+- inferred tenure clues
+- likely channel / experience evidence
+- firm / AUM context clues
+- missing / uncertain fields
+- source list
+- confidence notes
 
-#### 1) Environment & config
+Current mode:
 
-```bash
-cp .env.example .env
-```
+- The tool is implemented as a fixture-backed public-research runner using `data/ppp/research_fixtures.json`.
+- This keeps the interface realistic while preventing unsupported claims in an environment where live public-web verification is not always available.
+- The code is intentionally structured so the fixture-backed runner can be replaced by a live web research connector later without rewriting the rest of the pipeline.
 
-- Set `ANTHROPIC_API_KEY` in `.env` if you want real Claude calls.  
-- Leave it empty to run in **mock demo mode** (no cost, still end-to-end).
+## Validation And QA
 
-#### 2) Install dependencies
+This submission does more than generate JSON. It checks whether the output looks safe and usable for an actual recruiter workflow.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+Checks include:
 
-#### 3) Seed demo data & ingest documents
+- JSON parseability and schema compliance
+- exactly 5 candidates
+- score bounds and required fields
+- `career_narrative` sentence count
+- `outreach_hook` single-sentence rule
+- placeholder text detection
+- evidence-aware `role_fit.justification`
+- cautious AUM and tenure language
+- uncertainty signalling when evidence is incomplete
 
-```bash
-python3 scripts/seed_demo_data.py
-python3 scripts/ingest_documents.py
-```
+## Known Limitations
 
-Whenever you edit JSON under `data/raw/sample_*`, re-run:
+- The enrichment tool currently uses controlled fixtures rather than a live public-web connector.
+- LinkedIn URLs in the PPP brief are placeholders, so final public-profile verification still needs to happen against real sources.
+- Source citation is captured in enrichment artifacts, but not yet surfaced directly in the final `output.json` schema.
+- Confidence logic is rule-based and conservative rather than statistically calibrated.
 
-```bash
-python3 scripts/ingest_documents.py
-```
+## What I Would Build Next For PPP
 
-#### 4) Run API
+- A live public research connector that searches company pages, bios, and public profiles with source capture.
+- A citation-aware recruiter view that shows which sentence in the briefing is supported by which source.
+- A reviewer feedback loop so consultants can mark a briefing as accurate, weak, or misleading and improve future generations.
+- A candidate brief QA + outreach prioritisation layer that ranks who should actually be called first based on fit, evidence confidence, and mobility.
 
-```bash
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
+## Existing Background
 
-Health check:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-Sample requests:
-
-```bash
-# Role intake + retrieval
-curl -X POST http://127.0.0.1:8000/search/intake \
-  -H "Content-Type: application/json" \
-  -d '{"raw_input":"Our client is an Australian super fund looking for a Senior Infrastructure Portfolio Manager to oversee core/core-plus mandates, manager selection and portfolio construction across global infrastructure strategies."}'
-
-# End-to-end agentic workflow
-curl -X POST http://127.0.0.1:8000/search/run \
-  -H "Content-Type: application/json" \
-  -d '{"raw_input":"Our client is an Australian super fund looking for a Senior Infrastructure Portfolio Manager to oversee core/core-plus mandates, manager selection and portfolio construction across global infrastructure strategies."}'
-```
-
-#### 5) Run Streamlit UI
-
-```bash
-streamlit run app/ui/streamlit_app.py
-```
-
-The UI is split into 4 guided steps:
-
-1. **Role Intake** – paste a JD or search brief, then parse it into a structured `role_spec` with retrieved context.  
-2. **Candidate Search** – fetch demo candidates, view in table + detail card.  
-3. **Market Map** – review the current firm distribution and retrieved institutional context.  
-4. **Client Brief** – run ranking, generate a markdown brief, and approve before export.
-
-The left sidebar shows a **workflow timeline** (current step + completed steps). Navigation is primarily via the “Next” buttons at the bottom of each page.
-
-## API overview (MVP)
-
-- `POST /search/intake` → parse role + retrieve context
-- `POST /search/candidates` → list candidates from demo pool
-- `POST /search/rank` → score candidates (explainable)
-- `POST /search/run` → run end-to-end agentic workflow (intake + retrieval + ranking + brief + critique)
-- `POST /briefs/generate` → generate markdown brief
-- `POST /briefs/{brief_id}/submit|approve|reject|request-changes|create-revision|export`
-- `GET /briefs/{brief_id}/artifact`
-- `GET /projects/{project_id}/review`
-
-## Reviewer demo
-
-### Minimal startup
-
-```bash
-python3 scripts/seed_review_demo.py --reset
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-streamlit run app/ui/review_console.py
-```
-
-### Reviewer auth context
-
-- Researcher view:
-  `x-tenant-id=demo-review-tenant`
-  `x-user-role=researcher`
-  `x-user-id=demo_researcher`
-- Manager view:
-  `x-tenant-id=demo-review-tenant`
-  `x-user-role=consultant`
-  `x-user-id=demo_manager`
-
-The review console exposes these values in the sidebar, so no real third-party credentials are needed.
-
-### Suggested review flow
-
-1. Open `proj_demo_happy` and inspect summary, latest run, snapshot, latest brief, and audit.
-2. View exported artifact for the happy-path brief.
-3. Open `proj_demo_revision` and create a revision from the `changes_requested` brief.
-4. Submit as researcher, then switch to consultant to approve/export.
-5. Switch back to researcher and confirm approve/export are disabled or rejected.
-
-## Security / privacy notes (MVP scope)
-
-- Demo data only (no real PII required)
-- Designed to support: PII sanitization before logging, audit trails (prompt/model/version, timestamps), and human approval gates for client-facing outputs
-
-## Roadmap (high level)
-
-- LangGraph workflow (planner + critique + retry paths)
-- Prompt versioning + prompt caching for stable instruction prefixes
-- Audit log + approval workflow
-- Evaluation harness (`tests/evals/`) for parse accuracy, retrieval relevance, ranking agreement, hallucination rate
-- Adapter-based integrations (CRM/email/doc store)
+This repository evolved from my broader executive-search workflow system, which models role intake, candidate search, explainable ranking, briefing, approval, and review as a project-centric workflow rather than a chatbot. For this PPP submission, I narrowed that broader system into a task-focused candidate briefing agent so the assessment deliverable stays clear and directly runnable.
