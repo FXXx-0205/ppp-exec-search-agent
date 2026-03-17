@@ -1,0 +1,78 @@
+[
+  {
+    "doc_id": "firm_001",
+    "title": "Example Asset Management - Investment Team",
+    "text": "Example Asset Management manages institutional portfolios with a dedicated infrastructure investment team in Australia.",
+    "metadata": {
+      "doc_type": "firm_profile",
+      "sector": "Funds Management",
+      "region": "Australia",
+      "source": "demo"
+    }
+  },
+  {
+    "doc_id": "firm_201",
+    "title": "Southern Cross Asset Management - Investment Team",
+    "text": "Southern Cross Asset Management is an independent Australian funds manager focused on institutional clients, with dedicated teams across infrastructure, listed equities and multi-asset solutions. The infrastructure team manages core and core-plus strategies for superannuation funds.",
+    "metadata": {
+      "doc_type": "firm_profile",
+      "sector": "Funds Management",
+      "region": "Australia",
+      "company": "Southern Cross Asset Management",
+      "source": "demo",
+      "created_at": "2026-03-13"
+    }
+  },
+  {
+    "doc_id": "firm_202",
+    "title": "HarbourView Superannuation Fund - Investment Organisation",
+    "text": "HarbourView Superannuation Fund is a mid-sized Australian super fund with a dedicated internal investment team managing real assets, public markets and alternatives. The real assets team covers infrastructure, property and private credit with a focus on long-term income and inflation protection.",
+    "metadata": {
+      "doc_type": "firm_profile",
+      "sector": "Superannuation",
+      "region": "Australia",
+      "company": "HarbourView Superannuation Fund",
+      "source": "demo",
+      "created_at": "2026-03-13"
+    }
+  },
+  {
+    "doc_id": "firm_203",
+    "title": "Pacific Infrastructure Partners - Strategy Overview",
+    "text": "Pacific Infrastructure Partners is a specialist infrastructure investment manager focused on core and core-plus assets across transport, energy and digital infrastructure in Australia and New Zealand. The firm works with global institutional investors including superannuation funds and sovereign wealth funds.",
+    "metadata": {
+      "doc_type": "firm_profile",
+      "sector": "Infrastructure",
+      "region": "Australia / New Zealand",
+      "company": "Pacific Infrastructure Partners",
+      "source": "demo",
+      "created_at": "2026-03-13"
+    }
+  },
+  {
+    "doc_id": "firm_204",
+    "title": "Global Multi-Asset Investors - Institutional Solutions",
+    "text": "Global Multi-Asset Investors is a global asset manager providing multi-asset solutions to institutional clients. Portfolios typically include listed equities, fixed income, alternatives and allocations to listed and unlisted infrastructure strategies implemented via external managers.",
+    "metadata": {
+      "doc_type": "firm_profile",
+      "sector": "Funds Management",
+      "region": "Asia-Pacific",
+      "company": "Global Multi-Asset Investors",
+      "source": "demo",
+      "created_at": "2026-03-13"
+    }
+  },
+  {
+    "doc_id": "firm_205",
+    "title": "Institutional Advisory Partners - Manager Research",
+    "text": "Institutional Advisory Partners is an investment advisory firm providing manager research and portfolio construction advice to superannuation funds and other institutional investors. The firm maintains coverage lists and ratings across infrastructure, real estate and other alternative asset classes.",
+    "metadata": {
+      "doc_type": "firm_profile",
+      "sector": "Investment Consulting",
+      "region": "Australia",
+      "company": "Institutional Advisory Partners",
+      "source": "demo",
+      "created_at": "2026-03-13"
+    }
+  }
+]

@@ -1,0 +1,71 @@
+{
+  "tool_name": "candidate_public_profile_lookup",
+  "tool_mode": "fixture_backed",
+  "candidate_id": "candidate_5",
+  "full_name": "E",
+  "current_employer": "Five",
+  "current_title": "Title",
+  "verified_public_snippets": [
+    "Provided task input lists E as Title at Five.",
+    "LinkedIn URL in the PPP brief is a placeholder, so live public-profile verification is still pending."
+  ],
+  "inferred_tenure_years": null,
+  "tenure_rationale": "Exact current-role tenure could not be verified from the controlled fixture and remains a key follow-up item.",
+  "likely_channel_evidence": [
+    "The title 'Title' suggests senior distribution channel responsibility."
+  ],
+  "likely_experience_evidence": [
+    "Current employer/title pairing suggests relevance to funds-management client coverage at Five."
+  ],
+  "firm_aum_context": "Five appears to be a established market participant funds-management firm; exact AUM requires live public verification; distribution exposure inferred from the candidate's title.",
+  "firm_context_clues": [],
+  "mobility_evidence": [
+    "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified."
+  ],
+  "missing_fields": [
+    "exact current-role start date",
+    "verified reporting line / team size",
+    "direct evidence of platform, IFA, and superannuation coverage"
+  ],
+  "uncertain_fields": [
+    "precise tenure estimate",
+    "channel mix breadth",
+    "current mobility intent"
+  ],
+  "confidence_notes": [
+    "This enrichment run is fixture-backed and should be upgraded with live public-web verification before final submission."
+  ],
+  "sources": [
+    {
+      "label": "PPP task input CSV",
+      "source_type": "provided_input",
+      "url": null,
+      "confidence": "high"
+    },
+    {
+      "label": "Task brief LinkedIn placeholder",
+      "source_type": "linkedin_placeholder",
+      "url": "https://example.com/5",
+      "confidence": "low"
+    }
+  ],
+  "evidence": [
+    {
+      "category": "current_role",
+      "signal": "provided_input",
+      "snippet": "Provided task input lists E as Title at Five.",
+      "source_labels": [
+        "PPP task input CSV"
+      ]
+    },
+    {
+      "category": "mobility",
+      "signal": "uncertain",
+      "snippet": "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified.",
+      "source_labels": [
+        "Task brief LinkedIn placeholder"
+      ]
+    }
+  ],
+  "generated_at": "2026-03-17T10:53:16.540028+00:00"
+}

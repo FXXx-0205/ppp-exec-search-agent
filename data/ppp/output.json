@@ -1,0 +1,144 @@
+{
+  "candidates": [
+    {
+      "candidate_id": "candidate_1",
+      "full_name": "Andrew Swan",
+      "current_role": {
+        "title": "Head of Distribution",
+        "employer": "Pendal Group",
+        "tenure_years": 2.6
+      },
+      "career_narrative": "Andrew Swan currently serves as Head of Distribution at Pendal Group, an established Australian asset manager, where he has been for approximately 2.6 years in a senior distribution leadership role. His current title suggests broad responsibility across wholesale and institutional channels, though exact channel split and team scope remain unverified from public sources. Career progression prior to Pendal and total years in funds management distribution should be confirmed through direct conversation, as the available evidence does not establish the full trajectory required to assess depth against the 10+ year benchmark.",
+      "experience_tags": [
+        "distribution leadership",
+        "wholesale funds management",
+        "institutional coverage",
+        "multi-channel distribution",
+        "platform relationships"
+      ],
+      "firm_aum_context": "Pendal Group is treated in this controlled fixture as an established Australian funds-management platform; exact AUM and product mix should be verified from live public sources before final submission.",
+      "mobility_signal": {
+        "score": 3,
+        "rationale": "An estimated tenure of 2.6 years places Andrew near a natural review point where senior distribution leaders often assess next-step opportunities, though no public promotion or change signals are evident. The timeframe is neither too short to suggest flight risk nor so long as to indicate deep entrenchment, yielding a neutral-to-moderate mobility indicator pending direct exploration of ambition and timing."
+      },
+      "role_fit": {
+        "role": "Head of Distribution / National BDM",
+        "score": 7,
+        "justification": "Andrew's current Head of Distribution title at an established funds-management platform aligns well with the role specification and suggests relevant seniority, channel exposure, and leadership responsibility. His position likely provides direct experience with platforms, adviser networks, and institutional relationships central to the brief. However, the absence of verified evidence on team management scale, superannuation and family-office network depth, total years in distribution (the spec requires 10+ years), and product knowledge across equities, fixed income, and alternatives introduces meaningful uncertainty. The role fit is strong on title and organizational context but requires validation of tenure depth, network breadth, and team-building track record to confirm he meets the full requirements for a mid-tier active manager seeking an established market profile."
+      },
+      "outreach_hook": "Andrew, your distribution leadership at Pendal caught our attention for a newly mandated Head of Distribution role with a mid-tier active manager looking to accelerate institutional and wholesale growth—would be useful to compare notes if timing and scope align."
+    },
+    {
+      "candidate_id": "candidate_2",
+      "full_name": "Cathy Hales",
+      "current_role": {
+        "title": "Head of Retail Sales",
+        "employer": "Perpetual Limited",
+        "tenure_years": 3.1
+      },
+      "career_narrative": "Cathy Hales currently leads retail sales at Perpetual Limited, a large Australian wealth and asset-management platform, where she has spent approximately three years building channel distribution capability. Her title suggests depth in adviser, platform, and wholesale-distribution development rather than purely product-support activity. Evidence of institutional network strength and prior career trajectory remains unverified and should be explored during live conversation.",
+      "experience_tags": [
+        "retail sales leadership",
+        "wholesale distribution",
+        "platform distribution",
+        "adviser channel development",
+        "funds management distribution"
+      ],
+      "firm_aum_context": "Perpetual Limited is treated in this fixture as a large, visible Australian investment platform with public AUM disclosures that should be verified directly before final use.",
+      "mobility_signal": {
+        "score": 3,
+        "rationale": "Three-year tenure at Perpetual places Cathy at a natural checkpoint where senior candidates often reassess market opportunities, though no verified recent internal promotion or external search activity is captured in available evidence."
+      },
+      "role_fit": {
+        "role": "Head of Distribution / National BDM",
+        "score": 7,
+        "justification": "Strong alignment on wholesale and retail funds-distribution experience within a major Australian platform, with likely exposure to IFA networks and dealer groups. Leadership scope and channel-development focus map well to a national distribution remit. However, institutional depth—particularly proven track record with superannuation funds and family offices—remains unverified and is critical for this role. Team management scale and product breadth across equities, fixed income, and alternatives also require confirmation. The retail-sales focus at Perpetual may leave gaps in direct institutional investor relationship ownership compared to candidates with dedicated institutional BDM or Head of Distribution pedigree at mid-tier active managers."
+      },
+      "outreach_hook": "Cathy, your retail-sales leadership at Perpetual caught our attention for a Head of Distribution mandate where your platform and adviser-channel expertise could translate well, though we'd be keen to understand how much direct institutional coverage you've built alongside the retail book."
+    },
+    {
+      "candidate_id": "candidate_3",
+      "full_name": "Jason Ennis",
+      "current_role": {
+        "title": "Director, Inst. Sales",
+        "employer": "Fidelity International",
+        "tenure_years": 1.9
+      },
+      "career_narrative": "Jason Ennis currently serves as Director, Institutional Sales at Fidelity International, a large global asset manager, where he has been for approximately 1.9 years. His institutional-sales director title signals direct investor-facing responsibility with allocator relationships, though exact segment coverage, prior career arc, and wholesale platform exposure remain unverified. The profile suggests institutional channel depth, but team leadership scope and broader Australian market brand visibility require further confirmation.",
+      "experience_tags": [
+        "institutional sales",
+        "allocator relationships",
+        "global asset manager",
+        "investor-facing"
+      ],
+      "firm_aum_context": "Fidelity International is treated in this fixture as a large global asset manager with broad public-market product depth; exact local AUM and team scope should be confirmed from live sources.",
+      "mobility_signal": {
+        "score": 3,
+        "rationale": "Sub-two-year tenure at Fidelity International suggests he is likely still embedding and may be less immediately mobile unless a compelling strategic opportunity arises; institutional-sales professionals can remain highly relevant despite shorter tenure, but caution is warranted around near-term availability."
+      },
+      "role_fit": {
+        "role": "Head of Distribution / National BDM",
+        "score": 7,
+        "justification": "Jason's institutional-sales director role at a global asset manager demonstrates relevant allocator relationship experience and product knowledge aligned with the role's institutional focus. However, evidence of team leadership, national sales management, and deep networks across Australian superannuation funds, platforms, IFAs, and dealer groups is unverified. His wholesale channel breadth and existing Australian market profile remain uncertain, and his relatively short current tenure may limit immediate brand visibility in the mid-tier active manager landscape. Strong institutional credibility but gaps in confirmed wholesale platform coverage and proven team development at a comparable firm."
+      },
+      "outreach_hook": "Jason, your institutional-sales director role at Fidelity suggests strong allocator relationship skills—I'd value a confidential conversation about a Head of Distribution opportunity with a mid-tier Australian active manager seeking to scale both institutional and wholesale channels."
+    },
+    {
+      "candidate_id": "candidate_4",
+      "full_name": "Deborah Southon",
+      "current_role": {
+        "title": "Head of Distribution",
+        "employer": "Challenger Limited",
+        "tenure_years": 2.8
+      },
+      "career_narrative": "Deborah Southon currently serves as Head of Distribution at Challenger Limited, a public Australian financial-services platform, where she has been in role for approximately 2.8 years. Her title signals senior leadership across multiple distribution channels with external market visibility. While her current mandate suggests broad channel responsibility, verification of specific product expertise, team size, and direct superannuation/IFA coverage remains incomplete.",
+      "experience_tags": [
+        "distribution leadership",
+        "head of distribution",
+        "multi-channel distribution",
+        "australian funds management",
+        "wholesale distribution",
+        "senior leadership"
+      ],
+      "firm_aum_context": "Challenger Limited is treated here as a public Australian financial-services platform with investment and distribution visibility; live verification is still required for exact AUM relevance to the target role.",
+      "mobility_signal": {
+        "score": 3,
+        "rationale": "Tenure of approximately 2.8 years suggests moderate mobility potential if role scope has plateaued, though no public evidence confirms recent remit expansion or restlessness. At close to three years, she sits in a typical window for considering next-level moves, but absence of trajectory signals keeps this a moderate case."
+      },
+      "role_fit": {
+        "role": "Head of Distribution / National BDM",
+        "score": 7,
+        "justification": "Strong title match and likely senior leadership experience in Australian distribution make Deborah a credible fit for a Head of Distribution or National BDM role at a mid-tier active manager. Her current platform role at Challenger suggests exposure to institutional and wholesale channels, aligning well with the requirement for deep networks and proven relationship management. However, gaps remain: we lack confirmation of direct institutional sales track record, team leadership scale, national sales team development experience, and specific product knowledge across equities, fixed income, or alternatives. Her firm context is platform-oriented rather than pure active asset management, which may present a cultural or product learning curve. Profile and brand in the wholesale/institutional market are implied but unverified. Pending live LinkedIn and reference checks on superannuation/IFA networks, product breadth, and team metrics, she presents as a high-potential but not fully de-risked candidate."
+      },
+      "outreach_hook": "Deborah, given your distribution leadership at Challenger and the scale you've likely built across wholesale and institutional channels, I'd welcome a conversation about a Head of Distribution opportunity with a growing mid-tier active manager."
+    },
+    {
+      "candidate_id": "candidate_5",
+      "full_name": "Nikki Thomas",
+      "current_role": {
+        "title": "Senior BDM Wholesale",
+        "employer": "Magellan Financial",
+        "tenure_years": 2.2
+      },
+      "career_narrative": "Nikki Thomas currently serves as Senior BDM Wholesale at Magellan Financial, covering adviser, platform, and wholesale distribution channels with approximately 2.2 years in seat. Her title suggests strong channel execution capabilities within a visible Australian asset manager, though national team leadership scope remains to be verified through direct conversation. The role positions her as a growth candidate progressing through the BDM track, with evidence pointing to meaningful wholesale sales exposure but uncertainty around depth in institutional relationships and direct reports.",
+      "experience_tags": [
+        "wholesale distribution",
+        "adviser relationships",
+        "platform distribution",
+        "asset management sales",
+        "channel execution"
+      ],
+      "firm_aum_context": "Magellan Financial is a well-known Australian listed asset manager with material wholesale distribution relevance; exact AUM should be confirmed via live public disclosure before final submission.",
+      "mobility_signal": {
+        "score": 3,
+        "rationale": "At 2.2 years tenure, Nikki sits in the window where high performers often consider progression moves, particularly for a stretch leadership opportunity. However, without clear signals of active search behaviour or known dissatisfaction, mobility remains speculative and would depend heavily on the calibre of the opportunity and team leadership scope on offer."
+      },
+      "role_fit": {
+        "role": "Head of Distribution / National BDM",
+        "score": 5,
+        "justification": "Nikki brings relevant wholesale distribution experience at a credible Australian manager and clear channel execution capability, which aligns with the role's focus on platforms and IFAs. However, significant gaps exist against the spec: the role requires 10+ years and proven national team management, whereas her current tenure and title suggest she is earlier in her career arc without verified leadership of direct reports. Her institutional depth, superannuation fund networks, and public brand in the market remain unconfirmed. She would be a stretch appointment suited to a National BDM or Senior BDM role rather than a Head of Distribution, unless interview reveals hidden team leadership and deeper institutional relationships than the public profile suggests."
+      },
+      "outreach_hook": "Nikki, your wholesale distribution work at Magellan caught our attention in the context of a national leadership opportunity with a growing active manager—keen to explore whether you're open to a conversation about next-stage career moves."
+    }
+  ]
+}

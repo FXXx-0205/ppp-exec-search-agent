@@ -1,0 +1,11 @@
+{
+  "passed": false,
+  "findings": [
+    {
+      "candidate_id": null,
+      "severity": "error",
+      "check": "output_schema",
+      "message": "Input should be less than or equal to 10"
+    }
+  ]
+}

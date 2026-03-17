@@ -1,0 +1,204 @@
+[
+  {
+    "candidate_id": "cand_001",
+    "full_name": "Alex Chen",
+    "current_title": "Senior Portfolio Manager, Infrastructure",
+    "current_company": "Example Asset Management",
+    "location": "Australia",
+    "years_experience": 14,
+    "sectors": [
+      "Funds Management",
+      "Infrastructure"
+    ],
+    "functions": [
+      "Portfolio Management"
+    ],
+    "summary": "Leads institutional infrastructure portfolio construction and manager selection for Australian superannuation clients.",
+    "evidence": [
+      "Built infrastructure allocation for institutional investors",
+      "Managed multi-asset portfolio construction responsibilities"
+    ],
+    "source_urls": [
+      "https://example.com/profile/alex-chen"
+    ],
+    "confidence_score": 0.78
+  },
+  {
+    "candidate_id": "cand_002",
+    "full_name": "Jamie Patel",
+    "current_title": "Investment Director",
+    "current_company": "Infrastructure Partners",
+    "location": "Sydney, Australia",
+    "years_experience": 12,
+    "sectors": [
+      "Infrastructure",
+      "Private Markets"
+    ],
+    "functions": [
+      "Direct Investments"
+    ],
+    "summary": "Direct infrastructure investment experience across core/core-plus; limited explicit institutional PM mandate wording.",
+    "evidence": [
+      "Sourced and executed infrastructure deals",
+      "Worked with Australian institutional LPs"
+    ],
+    "source_urls": [
+      "https://example.com/profile/jamie-patel"
+    ],
+    "confidence_score": 0.7
+  },
+  {
+    "candidate_id": "cand_003",
+    "full_name": "Morgan Lee",
+    "current_title": "Portfolio Manager",
+    "current_company": "Global Funds Co",
+    "location": "Singapore",
+    "years_experience": 10,
+    "sectors": [
+      "Funds Management"
+    ],
+    "functions": [
+      "Portfolio Management"
+    ],
+    "summary": "Institutional portfolio management across alternatives; Australia relocation/mobility unclear.",
+    "evidence": [
+      "Institutional portfolio management",
+      "Alternatives allocation committee exposure"
+    ],
+    "source_urls": [
+      "https://example.com/profile/morgan-lee"
+    ],
+    "confidence_score": 0.62
+  },
+  {
+    "candidate_id": "cand_101",
+    "full_name": "Alex Morgan",
+    "current_title": "Senior Infrastructure Portfolio Manager",
+    "current_company": "Southern Cross Asset Management",
+    "location": "Sydney, Australia",
+    "years_experience": 14,
+    "sectors": [
+      "Infrastructure",
+      "Funds Management"
+    ],
+    "functions": [
+      "Portfolio Management",
+      "Manager Selection"
+    ],
+    "summary": "Leads infrastructure portfolio construction and manager selection for Australian super funds with direct responsibility for asset allocation and risk budgeting.",
+    "evidence": [
+      "Primary PM for AUD 8bn infrastructure portfolio across core/core-plus strategies.",
+      "Chairs the internal infrastructure investment committee.",
+      "Works with Australian superannuation clients on customised mandates."
+    ],
+    "source_urls": [
+      "https://example.com/team/alex-morgan"
+    ],
+    "confidence_score": 0.8
+  },
+  {
+    "candidate_id": "cand_102",
+    "full_name": "Sophie Tan",
+    "current_title": "Head of Real Assets",
+    "current_company": "HarbourView Superannuation Fund",
+    "location": "Melbourne, Australia",
+    "years_experience": 16,
+    "sectors": [
+      "Superannuation",
+      "Infrastructure",
+      "Real Estate"
+    ],
+    "functions": [
+      "Portfolio Management",
+      "Team Leadership"
+    ],
+    "summary": "Leads a multi-asset real assets portfolio covering infrastructure, real estate and private credit with board-facing responsibility for strategy and implementation.",
+    "evidence": [
+      "Manages internal team of 6 portfolio managers and analysts.",
+      "Accountable for long-term strategic asset allocation across real assets.",
+      "Regularly presents to investment committee and trustee board."
+    ],
+    "source_urls": [
+      "https://example.com/team/sophie-tan"
+    ],
+    "confidence_score": 0.77
+  },
+  {
+    "candidate_id": "cand_103",
+    "full_name": "Daniel Kim",
+    "current_title": "Investment Director, Infrastructure",
+    "current_company": "Pacific Infrastructure Partners",
+    "location": "Sydney, Australia",
+    "years_experience": 11,
+    "sectors": [
+      "Infrastructure",
+      "Private Equity"
+    ],
+    "functions": [
+      "Direct Investments",
+      "Asset Management"
+    ],
+    "summary": "Executes and manages core and core-plus infrastructure investments across transport and energy assets; close interaction with institutional LPs but limited direct portfolio management language.",
+    "evidence": [
+      "Originated and led multiple brownfield transport deals in Australia and New Zealand.",
+      "Member of the asset review committee overseeing portfolio company KPIs.",
+      "Regularly participates in LP advisory committee meetings with Australian institutions."
+    ],
+    "source_urls": [
+      "https://example.com/team/daniel-kim"
+    ],
+    "confidence_score": 0.7
+  },
+  {
+    "candidate_id": "cand_104",
+    "full_name": "Emily Zhao",
+    "current_title": "Portfolio Manager, Multi-Asset",
+    "current_company": "Global Multi-Asset Investors",
+    "location": "Singapore",
+    "years_experience": 10,
+    "sectors": [
+      "Funds Management",
+      "Multi-Asset"
+    ],
+    "functions": [
+      "Portfolio Management",
+      "Asset Allocation"
+    ],
+    "summary": "Runs multi-asset portfolios for institutional clients with an allocation to listed and unlisted infrastructure; strong portfolio construction skills but limited pure infrastructure specialisation.",
+    "evidence": [
+      "Co-manages global multi-asset strategy with >USD 5bn AUM.",
+      "Implements tactical tilts including infrastructure and real estate exposure.",
+      "Experience with Australian and Asian pension fund clients."
+    ],
+    "source_urls": [
+      "https://example.com/team/emily-zhao"
+    ],
+    "confidence_score": 0.65
+  },
+  {
+    "candidate_id": "cand_105",
+    "full_name": "James O'Neill",
+    "current_title": "Senior Analyst, Infrastructure Research",
+    "current_company": "Institutional Advisory Partners",
+    "location": "Sydney, Australia",
+    "years_experience": 8,
+    "sectors": [
+      "Infrastructure",
+      "Consulting"
+    ],
+    "functions": [
+      "Manager Research",
+      "Portfolio Advisory"
+    ],
+    "summary": "Provides manager research and portfolio advisory on infrastructure strategies to superannuation funds; strong coverage of the manager universe but limited direct portfolio ownership.",
+    "evidence": [
+      "Lead analyst on 20+ infrastructure managers across core, value-add and listed strategies.",
+      "Contributes to model portfolios and strategic tilts for institutional clients.",
+      "Writes research notes and recommendations for investment committees."
+    ],
+    "source_urls": [
+      "https://example.com/team/james-oneill"
+    ],
+    "confidence_score": 0.6
+  }
+]

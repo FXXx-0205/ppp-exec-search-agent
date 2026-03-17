@@ -1,0 +1,215 @@
+{
+  "Andrew Swan": {
+    "verified_public_snippets": [
+      "Provided task input lists Andrew Swan as Head of Distribution at Pendal Group.",
+      "The PPP brief indicates the LinkedIn URL is a placeholder, so live profile confirmation remains outstanding."
+    ],
+    "tenure_years": 2.6,
+    "tenure_rationale": "Estimated from the controlled fixture as an established but not long-tenured distribution leadership appointment; exact start date should be verified live.",
+    "likely_channel_evidence": [
+      "A Head of Distribution title usually implies broad responsibility across wholesale and institutional coverage.",
+      "Leadership framing suggests oversight of client-facing revenue channels rather than an individual-contributor-only remit."
+    ],
+    "likely_experience_evidence": [
+      "Current-role signal points to senior distribution leadership in funds management.",
+      "The employer/title pairing supports likely experience with adviser, platform, and institutional-facing conversations, but exact channel split remains unverified."
+    ],
+    "firm_aum_context": "Pendal Group is treated in this controlled fixture as an established Australian funds-management platform; exact AUM and product mix should be verified from live public sources before final submission.",
+    "firm_context_clues": [
+      "Established asset-management brand",
+      "Distribution function likely spans multiple client channels"
+    ],
+    "mobility_evidence": [
+      "An estimated tenure above two years may place the candidate near a reasonable review point, but live chronology is still required.",
+      "No verified public promotion history is available in the controlled fixture."
+    ],
+    "missing_fields": [
+      "exact role start date",
+      "verified team size",
+      "direct evidence of superannuation and family-office coverage"
+    ],
+    "uncertain_fields": [
+      "tenure precision",
+      "channel breadth",
+      "mobility intent"
+    ],
+    "confidence_notes": [
+      "This fixture prioritises caution over specificity and is designed to prevent unsupported claims."
+    ],
+    "sources": [
+      {
+        "label": "PPP task input CSV",
+        "source_type": "provided_input",
+        "confidence": "high"
+      },
+      {
+        "label": "PPP brief LinkedIn placeholder",
+        "source_type": "linkedin_placeholder",
+        "url": "linkedin.com/in/search",
+        "confidence": "low"
+      }
+    ],
+    "evidence": [
+      {
+        "category": "current_role",
+        "signal": "provided_input",
+        "snippet": "Andrew Swan is listed as Head of Distribution at Pendal Group.",
+        "source_labels": [
+          "PPP task input CSV"
+        ]
+      },
+      {
+        "category": "channel_inference",
+        "signal": "title_based_inference",
+        "snippet": "Head of Distribution typically implies responsibility across multiple revenue channels.",
+        "source_labels": [
+          "PPP task input CSV"
+        ]
+      }
+    ]
+  },
+  "Cathy Hales": {
+    "verified_public_snippets": [
+      "Provided task input lists Cathy Hales as Head of Retail Sales at Perpetual Limited.",
+      "The PPP brief notes that the LinkedIn URL should be replaced with a live profile during real research."
+    ],
+    "tenure_years": 3.1,
+    "likely_channel_evidence": [
+      "A retail-sales leadership title points strongly toward adviser, platform, and broader wholesale-distribution exposure.",
+      "The wording suggests depth in channel development rather than only product support."
+    ],
+    "likely_experience_evidence": [
+      "Role context supports evidence of retail / wholesale funds-management distribution.",
+      "Leadership scope suggests experience coordinating market-facing teams or priorities, although direct reports remain unverified."
+    ],
+    "firm_aum_context": "Perpetual Limited is treated in this fixture as a large, visible Australian investment platform with public AUM disclosures that should be verified directly before final use.",
+    "firm_context_clues": [
+      "Publicly visible Australian wealth and asset-management brand",
+      "Retail and wholesale relevance"
+    ],
+    "mobility_evidence": [
+      "An estimated three-year tenure can indicate a natural checkpoint for market receptivity.",
+      "No verified recent internal move is captured in the controlled fixture."
+    ],
+    "missing_fields": [
+      "verified institutional coverage depth",
+      "team size",
+      "specific product-set responsibility"
+    ],
+    "uncertain_fields": [
+      "institutional-network strength",
+      "exact tenure chronology"
+    ],
+    "confidence_notes": [
+      "Retail-sales leadership is strong directional evidence, but institutional overlap must be verified live."
+    ]
+  },
+  "Jason Ennis": {
+    "verified_public_snippets": [
+      "Provided task input lists Jason Ennis as Director, Inst. Sales at Fidelity International.",
+      "The supplied LinkedIn reference is a placeholder and should be replaced during final research."
+    ],
+    "tenure_years": 1.9,
+    "likely_channel_evidence": [
+      "An institutional-sales director title directly signals institutional client coverage.",
+      "The abbreviation 'Inst.' supports institutional orientation rather than retail-only distribution."
+    ],
+    "likely_experience_evidence": [
+      "Current title suggests direct investor-facing responsibility in institutional sales.",
+      "The profile likely carries deep allocator relationship exposure, though exact segment coverage is unverified."
+    ],
+    "firm_aum_context": "Fidelity International is treated in this fixture as a large global asset manager with broad public-market product depth; exact local AUM and team scope should be confirmed from live sources.",
+    "firm_context_clues": [
+      "Global asset manager",
+      "Institutional channel visibility"
+    ],
+    "mobility_evidence": [
+      "A sub-two-year estimate suggests caution: mobility may be lower unless there is a compelling strategic opportunity.",
+      "Institutional-sales profiles can still be highly relevant even when recent tenure is shorter."
+    ],
+    "missing_fields": [
+      "verified wholesale-platform exposure",
+      "team leadership scope",
+      "exact Australian market brand visibility"
+    ],
+    "uncertain_fields": [
+      "breadth across wholesale versus institutional channels",
+      "tenure precision"
+    ],
+    "confidence_notes": [
+      "Institutional-sales evidence is relatively stronger here than team-leadership evidence."
+    ]
+  },
+  "Deborah Southon": {
+    "verified_public_snippets": [
+      "Provided task input lists Deborah Southon as Head of Distribution at Challenger Limited.",
+      "The task brief makes clear that LinkedIn verification still needs to happen against a real public profile."
+    ],
+    "tenure_years": 2.8,
+    "likely_channel_evidence": [
+      "A Head of Distribution title suggests broad channel responsibility and senior market visibility.",
+      "The role wording indicates externally facing leadership likely spanning multiple client segments."
+    ],
+    "likely_experience_evidence": [
+      "Current role points to leadership-level distribution experience.",
+      "The controlled fixture supports a high-probability fit with national distribution mandates, pending live channel confirmation."
+    ],
+    "firm_aum_context": "Challenger Limited is treated here as a public Australian financial-services platform with investment and distribution visibility; live verification is still required for exact AUM relevance to the target role.",
+    "firm_context_clues": [
+      "Public Australian financial-services brand",
+      "Distribution leadership relevance"
+    ],
+    "mobility_evidence": [
+      "Estimated tenure close to three years can support a moderate mobility case if role scope has plateaued.",
+      "No controlled-fixture evidence confirms whether the candidate has recently expanded remit."
+    ],
+    "missing_fields": [
+      "verified direct reports",
+      "product breadth",
+      "confirmed superannuation and IFA coverage"
+    ],
+    "uncertain_fields": [
+      "exact product focus",
+      "mobility readiness"
+    ],
+    "confidence_notes": [
+      "This fixture is strongest on leadership signal and weaker on product-specific verification."
+    ]
+  },
+  "Nikki Thomas": {
+    "verified_public_snippets": [
+      "Provided task input lists Nikki Thomas as Senior BDM Wholesale at Magellan Financial.",
+      "The LinkedIn URL in the brief is a placeholder, so public-profile confirmation remains pending."
+    ],
+    "tenure_years": 2.2,
+    "likely_channel_evidence": [
+      "A Senior BDM Wholesale title points clearly to adviser, platform, and broader wholesale-distribution coverage.",
+      "The role framing suggests strong channel execution even if national team leadership is not yet confirmed."
+    ],
+    "likely_experience_evidence": [
+      "Current role suggests meaningful wholesale sales exposure in asset management.",
+      "The title supports candidate relevance for progression-from-BDM narratives, especially if leadership stretch can be evidenced live."
+    ],
+    "firm_aum_context": "Magellan Financial is treated here as a visible Australian asset-management brand with public AUM disclosures that should be checked live before final submission.",
+    "firm_context_clues": [
+      "Australian listed asset manager",
+      "Wholesale distribution relevance"
+    ],
+    "mobility_evidence": [
+      "A little over two years in seat may indicate some openness, particularly for a stretch leadership move.",
+      "The key open question is whether the candidate has already broadened into team management."
+    ],
+    "missing_fields": [
+      "verified institutional depth",
+      "team leadership scope",
+      "exact product specialisation"
+    ],
+    "uncertain_fields": [
+      "national leadership readiness",
+      "breadth beyond wholesale"
+    ],
+    "confidence_notes": [
+      "The controlled fixture supports a stronger 'growth candidate' narrative than a fully proven head-of-distribution narrative."
+    ]
+  }
+}
