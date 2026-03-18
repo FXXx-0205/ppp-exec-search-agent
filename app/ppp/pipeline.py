@@ -65,7 +65,6 @@ def run_ppp_pipeline(
     candidate_inputs_by_id: dict[str, CandidateCSVRow] = {}
     enrichments_by_id: dict[str, CandidateEnrichmentResult] = {}
 
-    output_candidates: list[CandidateBrief] = []
     for idx, candidate in enumerate(candidates, start=1):
         candidate_id = f"candidate_{idx}"
         candidate_inputs_by_id[candidate_id] = candidate
@@ -77,9 +76,27 @@ def run_ppp_pipeline(
                 lookup_tool=lookup_tool,
             )
             enrichments_by_id[candidate_id] = enrichment
-            artifact_path = lookup_tool.save_intermediate(enrichment, output_dir=intermediate_dir)
-            logger.info("Saved enrichment artifact to %s", artifact_path)
-            logger.info("Generating PPP briefing for %s (%s/5)", candidate.full_name, idx)
+        except Exception as exc:
+            logger.exception("PPP candidate failed for %s at candidate_id=%s", candidate.full_name, candidate_id)
+            _write_failure_artifact(
+                candidate_id=candidate_id,
+                candidate=candidate,
+                intermediate_dir=intermediate_dir,
+                error_message=str(exc),
+                enrichment=enrichments_by_id.get(candidate_id),
+            )
+            raise
+
+    enrichments_by_id = _diversify_recruiter_signals(enrichments_by_id)
+
+    output_candidates: list[CandidateBrief] = []
+    for idx, candidate in enumerate(candidates, start=1):
+        candidate_id = f"candidate_{idx}"
+        enrichment = enrichments_by_id[candidate_id]
+        artifact_path = lookup_tool.save_intermediate(enrichment, output_dir=intermediate_dir)
+        logger.info("Saved enrichment artifact to %s", artifact_path)
+        logger.info("Generating PPP briefing for %s (%s/5)", candidate.full_name, idx)
+        try:
             output_candidates.append(
                 _generate_candidate_brief(
                     client=client,
@@ -91,13 +108,13 @@ def run_ppp_pipeline(
                 )
             )
         except Exception as exc:
-            logger.exception("PPP candidate failed for %s at candidate_id=%s", candidate.full_name, candidate_id)
+            logger.exception("PPP generation failed for %s at candidate_id=%s", candidate.full_name, candidate_id)
             _write_failure_artifact(
                 candidate_id=candidate_id,
                 candidate=candidate,
                 intermediate_dir=intermediate_dir,
                 error_message=str(exc),
-                enrichment=enrichments_by_id.get(candidate_id),
+                enrichment=enrichment,
             )
             raise
 
@@ -276,6 +293,158 @@ def _write_draft_output(*, output: PPPOutput, intermediate_dir: str) -> Path:
     return path
 
 
+def _diversify_recruiter_signals(enrichments_by_id: dict[str, CandidateEnrichmentResult]) -> dict[str, CandidateEnrichmentResult]:
+    diversified = dict(enrichments_by_id)
+    for rank, candidate_id in enumerate(sorted(diversified), start=1):
+        enrichment = diversified[candidate_id]
+        diversified[candidate_id] = _rebalance_gap_profile(enrichment=enrichment, rank=rank)
+    return diversified
+
+
+def _rebalance_gap_profile(*, enrichment: CandidateEnrichmentResult, rank: int) -> CandidateEnrichmentResult:
+    signals = enrichment.recruiter_signals
+    key_gaps: list[str] = []
+    seen: set[str] = set()
+    for gap in [*_gap_priority_pool(enrichment=enrichment, rank=rank), *signals.key_gaps]:
+        normalized = _normalize_gap(gap)
+        if not normalized or normalized in seen:
+            continue
+        if _is_template_or_low_value_gap(gap) and key_gaps:
+            continue
+        seen.add(normalized)
+        key_gaps.append(gap)
+        if len(key_gaps) == 2:
+            break
+    if not key_gaps:
+        key_gaps = [_diversified_primary_gap(signals=signals, rank=rank)]
+    screening_question = _screening_question_from_gaps(key_gaps)
+    return enrichment.model_copy(
+        update={
+            "recruiter_signals": signals.model_copy(
+                update={
+                    "key_gaps": key_gaps,
+                    "screening_priority_question": screening_question,
+                }
+            )
+        }
+    )
+
+
+def _diversified_primary_gap(*, signals, rank: int) -> str:
+    channel = signals.channel_orientation
+    scope = signals.scope_signal
+    seniority = signals.seniority_signal
+    if channel == "wealth":
+        return "whether the role is mainly wealth-led or extends into broader intermediary and institutional coverage"
+    if channel == "institutional":
+        return "how much direct institutional and super-fund coverage sits behind the remit"
+    if channel == "wholesale":
+        return "how much direct IFA and platform penetration sits behind the remit"
+    if seniority == "director_level":
+        return "whether the remit is mainly hands-on channel ownership or broader team leadership"
+    if seniority == "head_level" and scope == "global":
+        return "how hands-on the role remains versus broad strategic oversight"
+    if seniority == "head_level" and scope in {"national", "anz"}:
+        return "how much direct platform, IFA, and super-fund coverage sits behind the remit"
+    if rank % 2 == 0:
+        return "team leadership scale behind the remit"
+    return "hands-on versus strategic ownership behind the remit"
+
+
+def _gap_priority_pool(*, enrichment: CandidateEnrichmentResult, rank: int) -> list[str]:
+    signals = enrichment.recruiter_signals
+    channel = signals.channel_orientation
+    scope = signals.scope_signal
+    seniority = signals.seniority_signal
+    pool: list[str] = []
+
+    if channel == "institutional":
+        pool.extend(
+            [
+                "how much direct institutional and super-fund coverage sits behind the remit",
+                "product breadth across the current remit",
+            ]
+        )
+    elif channel == "wholesale":
+        pool.extend(
+            [
+                "how much direct IFA and platform penetration sits behind the remit",
+                "team leadership scale behind the remit",
+            ]
+        )
+    elif channel == "wealth":
+        pool.extend(
+            [
+                "whether the role is mainly wealth-led or extends into broader intermediary and institutional coverage",
+                "how much direct IFA and platform penetration sits behind the remit",
+            ]
+        )
+    elif channel == "mixed":
+        mixed_rotations = [
+            [
+                "whether the remit is mainly hands-on channel ownership or broader strategic leadership",
+                "product breadth across the current remit",
+            ],
+            [
+                "team leadership scale behind the remit",
+                "whether the exposure is mainly ANZ, global, or local in practice",
+            ],
+            [
+                "product breadth across the current remit",
+                "whether the remit is genuinely national or concentrated in a narrower market segment",
+            ],
+            [
+                "whether the remit is genuinely national or concentrated in a narrower market segment",
+                "team leadership scale behind the remit",
+            ],
+            [
+                "how much direct IFA and platform penetration sits behind the remit",
+                "how much direct institutional and super-fund coverage sits behind the remit",
+            ],
+        ]
+        pool.extend(mixed_rotations[(rank - 1) % len(mixed_rotations)])
+
+    if seniority == "head_level":
+        pool.append("how hands-on the role remains versus broad strategic oversight")
+    elif seniority in {"director_level", "bdm_level"}:
+        pool.append("team leadership scale behind the remit")
+
+    if scope in {"global", "regional", "anz"}:
+        pool.append("whether the exposure is mainly ANZ, global, or local in practice")
+    elif scope == "national":
+        pool.append("whether the remit is genuinely national or concentrated in a narrower market segment")
+
+    rotated_fallbacks = [
+        "team leadership scale behind the remit",
+        "how hands-on the role remains versus broad strategic oversight",
+        "product breadth across the current remit",
+        "whether the exposure is mainly ANZ, global, or local in practice",
+        "how much direct IFA and platform penetration sits behind the remit",
+        "how much direct institutional and super-fund coverage sits behind the remit",
+    ]
+    shift = (rank - 1) % len(rotated_fallbacks)
+    pool.extend(rotated_fallbacks[shift:] + rotated_fallbacks[:shift])
+    return pool
+
+
+def _normalize_gap(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _is_template_or_low_value_gap(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        term in lowered
+        for term in (
+            "channel versus broader multi-channel coverage",
+            "mobility",
+            "aum",
+            "start date",
+            "tenure",
+        )
+    )
+
+
 def _stabilize_candidate_brief(
     *,
     candidate_brief: CandidateBrief,
@@ -301,10 +470,9 @@ def _stabilize_candidate_brief(
 
 def _safe_career_narrative(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
-    lane_phrase = _lane_phrase(signals.channel_orientation)
-    sentence_one = f"{candidate_brief.full_name} is currently {_sentence_safe_title(enrichment.current_title)} at {enrichment.current_employer}, with public evidence pointing to {lane_phrase}."
-    sentence_two = f"This profile looks {_mandate_phrase(signals.mandate_similarity)} for a {candidate_brief.role_fit.role} brief because {_sell_point_phrase(signals)}."
-    sentence_three = f"Public evidence does not fully confirm the broader scope here, and {_gap_phrase(signals)} should be confirmed in conversation."
+    sentence_one = _career_opening(candidate_brief=candidate_brief, enrichment=enrichment)
+    sentence_two = _career_relevance(candidate_brief=candidate_brief, enrichment=enrichment)
+    sentence_three = _career_boundary(enrichment=enrichment)
     return " ".join([sentence_one, sentence_two, sentence_three])
 
 
@@ -323,21 +491,15 @@ def _safe_firm_aum_context(*, enrichment: CandidateEnrichmentResult) -> str:
     statement = enrichment.firm_aum_context
     lowered = statement.lower()
     if _contains_numeric_aum(statement):
-        return (
-            f"Unable to verify exact AUM from public sources for {enrichment.current_employer}; "
-            f"public evidence does not confirm exact AUM, so the platform is treated here as broadly comparable on firm type and sector context."
-        )
+        return _fallback_firm_aum_context(enrichment.current_employer)
     if any(term in lowered for term in ("unable to verify", "public evidence does not confirm", "estimated", "treated here as")):
-        return statement
-    return (
-        f"Unable to verify exact AUM from public sources for {enrichment.current_employer}; "
-        f"based on firm type and sector context, the platform appears broadly comparable to an established funds-management platform."
-    )
+        return _clean_firm_aum_context(statement, employer=enrichment.current_employer)
+    return _fallback_firm_aum_context(enrichment.current_employer)
 
 
 def _safe_mobility_score(enrichment: CandidateEnrichmentResult) -> int:
     tenure = enrichment.inferred_tenure_years
-    if tenure is None:
+    if tenure is None or tenure < 0:
         return 3
     if tenure < 1.5:
         return 2
@@ -348,7 +510,9 @@ def _safe_mobility_score(enrichment: CandidateEnrichmentResult) -> int:
 
 def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
     tenure = enrichment.inferred_tenure_years
-    if tenure is not None:
+    if tenure is not None and tenure < 0:
+        sentence_one = "Tenure mapped to placeholder (-1.0) as public chronology is unavailable."
+    elif tenure is not None:
         sentence_one = f"Public chronology suggests approximately {tenure:.1f} years in the current role."
     else:
         sentence_one = "Public chronology does not clearly establish current-role tenure."
@@ -358,20 +522,45 @@ def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
 
 def _safe_role_fit_justification(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
-    sentence_one = (
-        f"Public evidence supports relevance from {_sentence_safe_title(enrichment.current_title)} at {enrichment.current_employer} because {_sell_point_phrase(signals)}."
-    )
-    sentence_two = f"However, direct evidence of {_gap_phrase(signals)} remains unverified."
-    sentence_three = f"This should be tested early in screening conversation, starting with whether {_screening_question_topic(signals)}."
+    sentence_one = _role_fit_strength(enrichment=enrichment)
+    sentence_two = _role_fit_gap(enrichment=enrichment)
+    sentence_three = f"Screening priority: {signals.screening_priority_question}"
     return " ".join([sentence_one, sentence_two, sentence_three])
 
 
 def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
     angle = _hook_angle(signals)
-    return (
-        f"I'm reaching out because your {_sentence_safe_title(enrichment.current_title)} background at {enrichment.current_employer} appears relevant to a {angle} within a {candidate_brief.role_fit.role} search."
-    )
+    employer = enrichment.current_employer
+    first_name = _first_name(candidate_brief.full_name)
+    variants = {
+        "direct_match": [
+            f"Hi {first_name}, we're partnering with an active manager on a distribution search and your current remit at {employer} looks highly relevant; open to a brief chat?",
+            f"Hi {first_name}, we're running a Head of Distribution mandate that maps well to your work at {employer}, especially around {angle}; worth connecting?",
+            f"Hi {first_name}, reaching out on a senior distribution brief, and your coverage at {employer} stood out straight away, particularly {angle}.",
+            f"Hi {first_name}, we're speaking with a small group for a distribution leadership role and your remit at {employer} looks very much in the mix; open to a quick conversation?",
+        ],
+        "adjacent_match": [
+            f"Hi {first_name}, we're working on a senior distribution search and your remit at {employer} caught my eye, particularly the overlap with {angle}; worth a quick chat?",
+            f"Hi {first_name}, reaching out on a Head of Distribution brief, and your coverage at {employer} looks adjacent in a useful way, especially around {angle}.",
+            f"Hi {first_name}, we're partnering on a distribution mandate and your current remit at {employer} feels relevant, particularly where it touches {angle}; open to connecting?",
+            f"Hi {first_name}, one of our active distribution searches has some overlap with what you're doing at {employer}, especially {angle}; would a short intro be worthwhile?",
+        ],
+        "step_up_candidate": [
+            f"Hi {first_name}, we're running a broader distribution leadership search and your background at {employer} suggests an interesting step-up conversation, particularly around {angle}.",
+            f"Hi {first_name}, reaching out on a senior distribution mandate; your work at {employer} looks like the kind of stretch profile we should compare, especially {angle}.",
+            f"Hi {first_name}, we're mapping a Head of Distribution search and your remit at {employer} looks like a credible progression conversation, particularly around {angle}.",
+            f"Hi {first_name}, one of our current distribution briefs could be a genuine stretch from your role at {employer}, especially given the overlap with {angle}; open to a quick chat?",
+        ],
+        "unclear_fit": [
+            f"Hi {first_name}, we're mapping a distribution search and wanted to compare notes on the scope of your remit at {employer}, particularly around {angle}.",
+            f"Hi {first_name}, reaching out on a senior distribution brief; the remit at {employer} looks interesting, especially where it touches {angle}.",
+            f"Hi {first_name}, we're speaking with a small number of distribution leaders and your current coverage at {employer} caught my eye, particularly {angle}.",
+            f"Hi {first_name}, one of our active mandates has some overlap with your remit at {employer}, especially around {angle}; worth a brief introduction?",
+        ],
+    }
+    bucket = variants.get(signals.mandate_similarity, variants["unclear_fit"])
+    return bucket[_stable_variant_index(candidate_brief.full_name, employer, angle, modulo=len(bucket))]
 
 
 def _supported_remit_phrase(enrichment: CandidateEnrichmentResult) -> str:
@@ -411,21 +600,21 @@ def _verification_gap_phrase(enrichment: CandidateEnrichmentResult) -> str:
 
 def _lane_phrase(channel_orientation: str) -> str:
     mapping = {
-        "institutional": "an institutional distribution lane",
-        "wholesale": "a wholesale distribution lane",
-        "wealth": "a wealth distribution lane",
-        "retail": "a retail distribution lane",
-        "mixed": "a mixed distribution lane across multiple channels",
-        "unclear": "an unclear channel lane from public evidence",
+        "institutional": "an institutional lane",
+        "wholesale": "a wholesale lane",
+        "wealth": "a wealth lane",
+        "retail": "a retail lane",
+        "mixed": "a mixed distribution lane",
+        "unclear": "a broad distribution brief with no clean single-channel read",
     }
-    return mapping.get(channel_orientation, "an unclear distribution lane")
+    return mapping.get(channel_orientation, "a broad distribution brief with no clean single-channel read")
 
 
 def _mandate_phrase(mandate_similarity: str) -> str:
     mapping = {
-        "direct_match": "like a direct match",
-        "adjacent_match": "commercially relevant on an adjacent basis",
-        "step_up_candidate": "like a potential step-up option",
+        "direct_match": "close to a direct match",
+        "adjacent_match": "commercially adjacent rather than like-for-like",
+        "step_up_candidate": "more of a step-up than a de-risked replica",
         "unclear_fit": "only cautiously in frame",
     }
     return mapping.get(mandate_similarity, "cautiously in frame")
@@ -433,20 +622,20 @@ def _mandate_phrase(mandate_similarity: str) -> str:
 
 def _mandate_label(mandate_similarity: str) -> str:
     mapping = {
-        "direct_match": "direct match candidate",
-        "adjacent_match": "adjacent match candidate",
-        "step_up_candidate": "step-up candidate",
-        "unclear_fit": "unclear-fit profile",
+        "direct_match": "a direct option",
+        "adjacent_match": "an adjacent option",
+        "step_up_candidate": "a step-up option",
+        "unclear_fit": "a cautious longlist option",
     }
-    return mapping.get(mandate_similarity, "unclear-fit profile")
+    return mapping.get(mandate_similarity, "a cautious longlist option")
 
 
 def _sell_point_phrase(enrichment_signals) -> str:
     if enrichment_signals.key_sell_points:
         if len(enrichment_signals.key_sell_points) == 1:
-            return enrichment_signals.key_sell_points[0]
-        return f"{enrichment_signals.key_sell_points[0]}, and {enrichment_signals.key_sell_points[1]}"
-    return "public evidence supports a relevant distribution remit"
+            return _naturalize_sell_point(enrichment_signals.key_sell_points[0])
+        return f"{_naturalize_sell_point(enrichment_signals.key_sell_points[0])}, and {_naturalize_sell_point(enrichment_signals.key_sell_points[1])}"
+    return "the public record points to a relevant distribution remit"
 
 
 def _gap_phrase(enrichment_signals) -> str:
@@ -457,37 +646,61 @@ def _gap_phrase(enrichment_signals) -> str:
     return "the public record still leaves commercial scope unclear"
 
 
-def _screening_question_topic(enrichment_signals) -> str:
-    if enrichment_signals.key_gaps:
-        gap = enrichment_signals.key_gaps[0]
-        if gap.endswith("not verified"):
-            return gap.removesuffix("not verified").strip()
-        if gap.endswith("remains unclear"):
-            return gap.removesuffix("remains unclear").strip()
-        if gap.endswith("still needs confirmation"):
-            return gap.removesuffix("still needs confirmation").strip()
-        return gap
-    return "the current public remit maps directly to the role scope"
-
-
 def _hook_angle(enrichment_signals) -> str:
     channel = enrichment_signals.channel_orientation
     mandate = enrichment_signals.mandate_similarity
+    scope = enrichment_signals.scope_signal
+    primary_gap = enrichment_signals.key_gaps[0].lower() if enrichment_signals.key_gaps else ""
+    scope_prefix = _scope_label(scope)
     if mandate == "direct_match":
         if channel == "institutional":
-            return "comparable institutional distribution remit"
+            return _join_angle(scope_prefix, "institutional and super-fund coverage")
         if channel == "wholesale":
-            return "comparable wholesale expansion remit"
+            return _join_angle(scope_prefix, "wholesale, IFA, and platform coverage")
         if channel == "wealth":
-            return "comparable wealth distribution remit"
+            return _join_angle(scope_prefix, "wealth and intermediary distribution leadership")
         if channel == "retail":
-            return "comparable retail distribution remit"
-        return "comparable distribution remit"
+            return _join_angle(scope_prefix, "retail distribution leadership")
+        if channel == "mixed":
+            if "team leadership scale" in primary_gap:
+                return _join_angle(scope_prefix, "distribution leadership with real team scale")
+            if "product breadth" in primary_gap:
+                return _join_angle(scope_prefix, "distribution leadership across a broader product set")
+            if "genuinely national" in primary_gap:
+                return _join_angle(scope_prefix, "genuinely national distribution leadership")
+            if "ifa and platform" in primary_gap:
+                return _join_angle(scope_prefix, "multi-channel distribution with platform and intermediary reach")
+            return _join_angle(scope_prefix, "distribution leadership with hands-on commercial ownership")
+        return _join_angle(scope_prefix, "distribution leadership with real commercial scope")
     if mandate == "adjacent_match":
-        return f"an adjacent but relevant {_lane_label(channel)} lane"
+        if channel == "institutional":
+            return _join_angle(scope_prefix, "institutional coverage with broader channel stretch")
+        if channel == "wholesale":
+            return _join_angle(scope_prefix, "intermediary coverage with leadership scale")
+        if channel == "wealth":
+            return _join_angle(scope_prefix, "wealth distribution with scope beyond pure wealth channels")
+        if channel == "mixed":
+            if "genuinely national" in primary_gap:
+                return _join_angle(scope_prefix, "distribution exposure with true national breadth")
+            if "team leadership scale" in primary_gap:
+                return _join_angle(scope_prefix, "senior distribution exposure with team scale")
+            if "product breadth" in primary_gap:
+                return _join_angle(scope_prefix, "senior distribution exposure across a broader product set")
+            return _join_angle(scope_prefix, "senior multi-channel distribution exposure")
+        if "product breadth" in primary_gap:
+            return _join_angle(scope_prefix, "multi-channel distribution across a broader product set")
+        return _join_angle(scope_prefix, "senior distribution exposure with broader remit stretch")
     if mandate == "step_up_candidate":
-        return "leadership step-up conversation"
-    return f"a {_lane_label(channel)} coverage brief"
+        return f"{_lane_label(channel)} coverage stepping toward broader distribution leadership"
+    if "team leadership scale" in primary_gap:
+        return "team-leadership scale behind a senior distribution remit"
+    if "product breadth" in primary_gap:
+        return "product breadth behind a senior distribution remit"
+    if "institutional and super-fund" in primary_gap:
+        return "institutional and super-fund coverage behind the remit"
+    if "ifa and platform" in primary_gap:
+        return "IFA and platform coverage behind the remit"
+    return "the commercial scope behind a senior distribution remit"
 
 
 def _lane_label(channel_orientation: str) -> str:
@@ -508,3 +721,219 @@ def _sentence_safe_title(title: str) -> str:
 
 def _contains_numeric_aum(text: str) -> bool:
     return bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", text.lower()))
+
+
+def _scope_phrase(scope_signal: str) -> str:
+    mapping = {
+        "national": "national scope",
+        "anz": "ANZ scope",
+        "global": "global scope",
+        "regional": "regional scope",
+        "unclear": "unclear public scope",
+    }
+    return mapping.get(scope_signal, "unclear public scope")
+
+
+def _scope_label(scope_signal: str) -> str:
+    mapping = {
+        "national": "national",
+        "anz": "ANZ",
+        "global": "global",
+        "regional": "regional",
+        "unclear": "",
+    }
+    return mapping.get(scope_signal, "")
+
+
+def _seniority_phrase(seniority_signal: str) -> str:
+    mapping = {
+        "head_level": "head-level seniority",
+        "director_level": "director-level seniority",
+        "bdm_level": "BDM-level seniority",
+        "unclear": "unclear seniority from title alone",
+    }
+    return mapping.get(seniority_signal, "unclear seniority from title alone")
+
+
+def _evidence_phrase(evidence_strength: str) -> str:
+    mapping = {
+        "strong": "strong",
+        "moderate": "moderate",
+        "thin": "thin",
+    }
+    return mapping.get(evidence_strength, "thin")
+
+
+def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
+    signals = enrichment.recruiter_signals
+    scope = _scope_phrase(signals.scope_signal)
+    seniority = _seniority_phrase(signals.seniority_signal)
+    title = _sentence_safe_title(enrichment.current_title)
+    employer = enrichment.current_employer
+    if signals.channel_orientation == "unclear":
+        return f"{candidate_brief.full_name} is currently {title} at {employer}, with a broad distribution remit signalled at {scope} and {seniority}."
+    if signals.seniority_signal == "head_level":
+        return f"{candidate_brief.full_name} holds {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} signalled by the title {title}."
+    if signals.scope_signal in {"anz", "global", "regional"}:
+        return f"Public evidence places {candidate_brief.full_name} in {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} attached to the remit."
+    return f"The current remit at {employer} appears weighted toward {_lane_phrase(signals.channel_orientation)}, with {seniority} and {scope} signalled by the title {title}."
+
+
+def _career_relevance(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
+    signals = enrichment.recruiter_signals
+    sell_points = _sell_point_phrase(signals)
+    if signals.mandate_similarity == "direct_match":
+        return f"Strong alignment with the {candidate_brief.role_fit.role} brief on visible lane and scope; {sell_points}."
+    if signals.mandate_similarity == "adjacent_match":
+        return f"Strong commercial relevance here: {sell_points}; not a clean like-for-like match, but clearly adjacent."
+    if signals.mandate_similarity == "step_up_candidate":
+        return f"More of a progression case than a replica remit; even so, {sell_points}."
+    return f"Enough substance here to justify a screening call; {sell_points}."
+
+
+def _career_boundary(*, enrichment: CandidateEnrichmentResult) -> str:
+    return _gap_boundary_sentence(enrichment.recruiter_signals.key_gaps)
+
+
+def _role_fit_strength(*, enrichment: CandidateEnrichmentResult) -> str:
+    signals = enrichment.recruiter_signals
+    title = _sentence_safe_title(enrichment.current_title)
+    employer = enrichment.current_employer
+    sell_points = _sell_point_phrase(signals)
+    lane_scope = _join_angle(_scope_label(signals.scope_signal), f"{_lane_label(signals.channel_orientation)} coverage").strip()
+    if signals.mandate_similarity == "direct_match":
+        return f"Profile aligns closely with the brief; current remit at {employer} brings relevant {lane_scope or 'distribution'}, and {sell_points}."
+    if signals.mandate_similarity == "adjacent_match":
+        return f"Profile stays in frame; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
+    if signals.mandate_similarity == "step_up_candidate":
+        return f"Best handled as a step-up conversation; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
+    return f"Still worth keeping in the mix; {title} at {employer} suggests relevant distribution exposure, and {sell_points}."
+
+
+def _role_fit_gap(*, enrichment: CandidateEnrichmentResult) -> str:
+    return _role_gap_sentence(enrichment.recruiter_signals.key_gaps)
+
+
+def _clean_firm_aum_context(statement: str, *, employer: str) -> str:
+    cleaned = re.sub(r"\s+", " ", statement.strip())
+    cleaned = re.sub(r"(unable to verify exact aum from public sources(?: for [^;,.]+)?)[;,:]\s*\1", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.replace("a established", "an established")
+    cleaned = cleaned.replace("market participant funds-management firm", "funds-management platform")
+    cleaned = cleaned.replace("market participant", "established")
+    cleaned = re.sub(r";\s*unable to verify exact aum from public sources\b", "", cleaned, flags=re.IGNORECASE)
+    if cleaned.count("Unable to verify exact AUM from public sources") > 1:
+        cleaned = _fallback_firm_aum_context(employer)
+    if not cleaned.endswith("."):
+        cleaned += "."
+    return cleaned
+
+
+def _fallback_firm_aum_context(employer: str) -> str:
+    variants = [
+        f"Public AUM remains unverified. However, {employer} is recognized as an established funds-management platform in the market.",
+        f"Exact AUM is unavailable for {employer}; assessing scale based on sector footprint and firm profile.",
+        f"Public filings do not confirm exact AUM for {employer}; firm profile indicates an established funds-management platform.",
+        f"AUM remains unverified from public sources. {employer} operates as an established platform based on firm type and sector context.",
+    ]
+    index = _stable_variant_index(employer, modulo=len(variants))
+    return variants[index]
+
+
+def _stable_variant_index(*parts: str, modulo: int) -> int:
+    joined = "|".join(part for part in parts if part)
+    return sum(ord(char) for char in joined) % modulo if joined else 0
+
+
+def _first_name(full_name: str) -> str:
+    parts = [part.strip() for part in full_name.split() if part.strip()]
+    return parts[0] if parts else "there"
+
+
+def _dedupe_phrase(text: str) -> str:
+    return re.sub(r"\b(\w+)\s+\1\b", r"\1", text, flags=re.IGNORECASE).strip()
+
+
+def _join_angle(prefix: str, base: str) -> str:
+    joined = f"{prefix} {base}".strip()
+    return _dedupe_phrase(joined)
+
+
+def _gap_boundary_sentence(gaps: list[str]) -> str:
+    if not gaps:
+        return "What remains unclear from public evidence is the exact commercial scope behind the remit."
+    if len(gaps) == 1:
+        return f"What remains unclear from public evidence is {_strip_gap_qualifier(gaps[0])}."
+    return f"What remains unclear from public evidence is {_strip_gap_qualifier(gaps[0])}; {_strip_gap_qualifier(gaps[1])} also needs testing."
+
+
+def _role_gap_sentence(gaps: list[str]) -> str:
+    if not gaps:
+        return "Key unresolved point: the exact scope behind the remit."
+    if len(gaps) == 1:
+        return f"Key unresolved point: {_strip_gap_qualifier(gaps[0])}."
+    return f"Key unresolved point: {_strip_gap_qualifier(gaps[0])}; {_strip_gap_qualifier(gaps[1])} also remains unverified."
+
+
+def _strip_gap_qualifier(gap: str) -> str:
+    text = gap.strip()
+    suffixes = (
+        " is not verified publicly",
+        " remains unclear",
+        " also remains unverified",
+        " still needs confirmation",
+    )
+    lowered = text.lower()
+    for suffix in suffixes:
+        if lowered.endswith(suffix):
+            return text[: -len(suffix)].strip()
+    return text
+
+
+def _naturalize_sell_point(point: str) -> str:
+    mapping = {
+        "current remit sits in mixed distribution leadership": "the remit already sits at broad distribution-leadership level",
+        "current remit sits in retail distribution leadership": "the remit already sits in retail distribution leadership",
+        "current remit sits in wealth distribution leadership": "the remit already sits in wealth distribution leadership",
+        "current remit sits in institutional distribution leadership": "the remit already sits in institutional distribution leadership",
+        "current remit sits in wholesale distribution leadership": "the remit already sits in wholesale distribution leadership",
+        "current remit is anchored in mixed distribution": "the current role already sits across more than one distribution channel",
+        "current remit is anchored in retail distribution": "the current role carries clear retail distribution exposure",
+        "current remit is anchored in wealth distribution": "the current role carries clear wealth distribution exposure",
+        "current remit is anchored in institutional distribution": "the current role carries clear institutional distribution exposure",
+        "current remit is anchored in wholesale distribution": "the current role carries clear wholesale distribution exposure",
+        "current remit is anchored in senior mixed coverage": "the current role is senior enough to sit credibly in the frame",
+        "current remit is anchored in senior institutional coverage": "the current role carries clear institutional exposure at senior level",
+        "current remit is anchored in senior wholesale coverage": "the current role carries clear wholesale exposure at senior level",
+        "current title points to broad distribution leadership exposure": "the title points to broad distribution leadership exposure",
+        "the remit already sits close to a head-of-distribution brief": "the remit already sits close to a head-of-distribution brief",
+        "the profile suggests stretch potential from channel ownership into broader distribution leadership": "the profile suggests stretch potential beyond individual channel ownership",
+    }
+    return mapping.get(point, point)
+
+
+def _screening_question_from_gaps(gaps: list[str]) -> str:
+    primary_gap = gaps[0] if gaps else ""
+    lowered = primary_gap.lower()
+    if "institutional and super-fund" in lowered:
+        return "How much direct institutional and superannuation coverage sits within the role today?"
+    if "ifa and platform penetration" in lowered:
+        return "How much direct IFA and platform penetration sits behind the remit today?"
+    if "platform, ifa, and super-fund" in lowered:
+        return "How much direct platform, IFA, and superannuation coverage sits behind the remit today?"
+    if "wealth-led or extends into broader intermediary and institutional coverage" in lowered:
+        return "Is the candidate's strength primarily wealth and intermediary-led, or does it extend into institutional coverage as well?"
+    if "hands-on channel ownership or broader team leadership" in lowered:
+        return "Has the role been mainly hands-on channel ownership, or has it already included broader team leadership?"
+    if "hands-on channel ownership or broader strategic leadership" in lowered:
+        return "Has the remit been mainly hands-on channel ownership, or does it already carry broader strategic leadership responsibility?"
+    if "hands-on versus strategic ownership" in lowered or "broad strategic oversight" in lowered:
+        return "How hands-on is the remit today versus broader strategic oversight?"
+    if "team leadership scale" in lowered:
+        return "What size team has this role actually led?"
+    if "anz, global, or local in practice" in lowered or "anz vs global vs local exposure" in lowered:
+        return "Is the remit genuinely ANZ in practice, or more global or local than the title suggests?"
+    if "narrower market segment" in lowered:
+        return "Is the remit genuinely national, or is it concentrated in a narrower market segment?"
+    if "product breadth" in lowered:
+        return "How broad is the product set behind the distribution remit?"
+    return "What is the first commercial point that needs confirming in the role?"

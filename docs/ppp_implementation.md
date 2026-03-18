@@ -40,13 +40,19 @@ Phase 2 adds a dedicated enrichment/tool layer:
 
 Because the current implementation environment does not guarantee live public-web access, the enrichment stage runs in a controlled fixture-backed mode by default using `data/ppp/research_fixtures.json`.
 
+The tool now supports three research modes:
+
+- `fixture`
+- `live`
+- `auto` (live first, then fixture fallback)
+
 This is deliberate:
 
 - it preserves a real tool interface and two-stage architecture
 - it prevents unsupported claims from creeping into the final brief
 - it keeps the system ready for a later live-web connector without rewriting the pipeline
 
-When Anthropic tool use is available, the pipeline can ask Claude to call `candidate_public_profile_lookup`; when it is not, the pipeline falls back to direct local execution of the same tool contract.
+The enrichment stage now executes the `candidate_public_profile_lookup` research adapter directly and normalizes the result into the existing enrichment schema before the final Claude generation call. In live or auto mode, that same contract can call a real public-web search provider with fixture fallback when needed.
 
 ## QA layer
 

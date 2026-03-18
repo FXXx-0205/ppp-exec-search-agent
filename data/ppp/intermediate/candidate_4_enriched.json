@@ -1,39 +1,45 @@
 {
   "tool_name": "candidate_public_profile_lookup",
-  "tool_mode": "fixture_backed",
+  "tool_mode": "fixture_fallback",
   "candidate_id": "candidate_4",
-  "full_name": "D",
-  "current_employer": "Four",
-  "current_title": "Title",
+  "full_name": "Deborah Southon",
+  "current_employer": "Challenger Limited",
+  "current_title": "Head of Distribution",
   "verified_public_snippets": [
-    "Provided task input lists D as Title at Four.",
-    "LinkedIn URL in the PPP brief is a placeholder, so live public-profile verification is still pending."
+    "Provided task input lists Deborah Southon as Head of Distribution at Challenger Limited.",
+    "The task brief makes clear that LinkedIn verification still needs to happen against a real public profile."
   ],
-  "inferred_tenure_years": null,
-  "tenure_rationale": "Exact current-role tenure could not be verified from the controlled fixture and remains a key follow-up item.",
+  "inferred_tenure_years": 2.8,
+  "tenure_rationale": "Estimated at approximately 2.8 years based on controlled research fixture chronology.",
   "likely_channel_evidence": [
-    "The title 'Title' suggests senior distribution channel responsibility."
+    "A Head of Distribution title suggests broad channel responsibility and senior market visibility.",
+    "The role wording indicates externally facing leadership likely spanning multiple client segments."
   ],
   "likely_experience_evidence": [
-    "Current employer/title pairing suggests relevance to funds-management client coverage at Four."
+    "Current role points to leadership-level distribution experience.",
+    "The controlled fixture supports a high-probability fit with national distribution mandates, pending live channel confirmation."
   ],
-  "firm_aum_context": "Four appears to be a established market participant funds-management firm; exact AUM requires live public verification; distribution exposure inferred from the candidate's title.",
-  "firm_context_clues": [],
+  "firm_aum_context": "Challenger Limited is treated here as a public Australian financial-services platform with investment and distribution visibility; live verification is still required for exact AUM relevance to the target role.",
+  "firm_context_clues": [
+    "Public Australian financial-services brand",
+    "Distribution leadership relevance"
+  ],
   "mobility_evidence": [
-    "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified."
+    "Estimated tenure close to three years can support a moderate mobility case if role scope has plateaued.",
+    "No controlled-fixture evidence confirms whether the candidate has recently expanded remit."
   ],
   "missing_fields": [
-    "exact current-role start date",
-    "verified reporting line / team size",
-    "direct evidence of platform, IFA, and superannuation coverage"
+    "verified direct reports",
+    "product breadth",
+    "confirmed superannuation and IFA coverage"
   ],
   "uncertain_fields": [
-    "precise tenure estimate",
-    "channel mix breadth",
-    "current mobility intent"
+    "exact product focus",
+    "mobility readiness"
   ],
   "confidence_notes": [
-    "This enrichment run is fixture-backed and should be upgraded with live public-web verification before final submission."
+    "This fixture is strongest on leadership signal and weaker on product-specific verification.",
+    "Live public-web research was unavailable or failed, so the enrichment fell back to the controlled fixture."
   ],
   "sources": [
     {
@@ -45,7 +51,7 @@
     {
       "label": "Task brief LinkedIn placeholder",
       "source_type": "linkedin_placeholder",
-      "url": "https://example.com/4",
+      "url": "linkedin.com/in/search",
       "confidence": "low"
     }
   ],
@@ -53,7 +59,7 @@
     {
       "category": "current_role",
       "signal": "provided_input",
-      "snippet": "Provided task input lists D as Title at Four.",
+      "snippet": "Provided task input lists Deborah Southon as Head of Distribution at Challenger Limited.",
       "source_labels": [
         "PPP task input CSV"
       ]
@@ -61,11 +67,11 @@
     {
       "category": "mobility",
       "signal": "uncertain",
-      "snippet": "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified.",
+      "snippet": "Estimated tenure close to three years can support a moderate mobility case if role scope has plateaued.",
       "source_labels": [
         "Task brief LinkedIn placeholder"
       ]
     }
   ],
-  "generated_at": "2026-03-17T10:53:16.539815+00:00"
+  "generated_at": "2026-03-17T12:46:38.136632+00:00"
 }

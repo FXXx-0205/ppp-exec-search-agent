@@ -1,39 +1,45 @@
 {
   "tool_name": "candidate_public_profile_lookup",
-  "tool_mode": "fixture_backed",
+  "tool_mode": "fixture_fallback",
   "candidate_id": "candidate_3",
-  "full_name": "C",
-  "current_employer": "Three",
-  "current_title": "Title",
+  "full_name": "Jason Ennis",
+  "current_employer": "Fidelity International",
+  "current_title": "Director, Inst. Sales",
   "verified_public_snippets": [
-    "Provided task input lists C as Title at Three.",
-    "LinkedIn URL in the PPP brief is a placeholder, so live public-profile verification is still pending."
+    "Provided task input lists Jason Ennis as Director, Inst. Sales at Fidelity International.",
+    "The supplied LinkedIn reference is a placeholder and should be replaced during final research."
   ],
-  "inferred_tenure_years": null,
-  "tenure_rationale": "Exact current-role tenure could not be verified from the controlled fixture and remains a key follow-up item.",
+  "inferred_tenure_years": 1.9,
+  "tenure_rationale": "Estimated at approximately 1.9 years based on controlled research fixture chronology.",
   "likely_channel_evidence": [
-    "The title 'Title' suggests senior distribution channel responsibility."
+    "An institutional-sales director title directly signals institutional client coverage.",
+    "The abbreviation 'Inst.' supports institutional orientation rather than retail-only distribution."
   ],
   "likely_experience_evidence": [
-    "Current employer/title pairing suggests relevance to funds-management client coverage at Three."
+    "Current title suggests direct investor-facing responsibility in institutional sales.",
+    "The profile likely carries deep allocator relationship exposure, though exact segment coverage is unverified."
   ],
-  "firm_aum_context": "Three appears to be a established market participant funds-management firm; exact AUM requires live public verification; distribution exposure inferred from the candidate's title.",
-  "firm_context_clues": [],
+  "firm_aum_context": "Fidelity International is treated in this fixture as a large global asset manager with broad public-market product depth; exact local AUM and team scope should be confirmed from live sources.",
+  "firm_context_clues": [
+    "Global asset manager",
+    "Institutional channel visibility"
+  ],
   "mobility_evidence": [
-    "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified."
+    "A sub-two-year estimate suggests caution: mobility may be lower unless there is a compelling strategic opportunity.",
+    "Institutional-sales profiles can still be highly relevant even when recent tenure is shorter."
   ],
   "missing_fields": [
-    "exact current-role start date",
-    "verified reporting line / team size",
-    "direct evidence of platform, IFA, and superannuation coverage"
+    "verified wholesale-platform exposure",
+    "team leadership scope",
+    "exact Australian market brand visibility"
   ],
   "uncertain_fields": [
-    "precise tenure estimate",
-    "channel mix breadth",
-    "current mobility intent"
+    "breadth across wholesale versus institutional channels",
+    "tenure precision"
   ],
   "confidence_notes": [
-    "This enrichment run is fixture-backed and should be upgraded with live public-web verification before final submission."
+    "Institutional-sales evidence is relatively stronger here than team-leadership evidence.",
+    "Live public-web research was unavailable or failed, so the enrichment fell back to the controlled fixture."
   ],
   "sources": [
     {
@@ -45,7 +51,7 @@
     {
       "label": "Task brief LinkedIn placeholder",
       "source_type": "linkedin_placeholder",
-      "url": "https://example.com/3",
+      "url": "linkedin.com/in/search",
       "confidence": "low"
     }
   ],
@@ -53,7 +59,7 @@
     {
       "category": "current_role",
       "signal": "provided_input",
-      "snippet": "Provided task input lists C as Title at Three.",
+      "snippet": "Provided task input lists Jason Ennis as Director, Inst. Sales at Fidelity International.",
       "source_labels": [
         "PPP task input CSV"
       ]
@@ -61,11 +67,11 @@
     {
       "category": "mobility",
       "signal": "uncertain",
-      "snippet": "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified.",
+      "snippet": "A sub-two-year estimate suggests caution: mobility may be lower unless there is a compelling strategic opportunity.",
       "source_labels": [
         "Task brief LinkedIn placeholder"
       ]
     }
   ],
-  "generated_at": "2026-03-17T10:53:16.539596+00:00"
+  "generated_at": "2026-03-17T12:46:17.823385+00:00"
 }

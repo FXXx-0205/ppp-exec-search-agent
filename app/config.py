@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     auth_mode: str = "hybrid"
 
     anthropic_api_key: str | None = None
+    ppp_research_mode: str = "fixture"
+    ppp_research_provider: str = "tavily"
+    ppp_research_timeout_seconds: float = 20.0
+    tavily_api_key: str | None = None
     jwt_secret: str | None = None
     jwt_issuer: str | None = None
     jwt_audience: str | None = None

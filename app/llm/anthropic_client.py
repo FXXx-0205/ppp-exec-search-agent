@@ -3,20 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
 from typing import Any, cast
 
 from app.config import settings
 from app.core.metrics import observe_llm_call
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class LLMResponse:
-    text: str
-    model: str
-
 
 class ClaudeClient:
     def __init__(self, api_key: str | None = None):
@@ -76,99 +68,6 @@ class ClaudeClient:
             estimated_tokens=estimated_tokens,
         )
         return "\n".join(parts).strip()
-
-    def generate_with_tools(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        model: str = "claude-sonnet-4-6",
-        max_tokens: int = 1200,
-        tools: list[dict[str, Any]],
-        tool_handler,
-        extra: dict[str, Any] | None = None,
-        max_rounds: int = 4,
-    ) -> str:
-        started_at = time.perf_counter()
-        estimated_tokens = max(1, (len(system_prompt) + len(user_prompt)) // 4)
-
-        if not self._client:
-            observe_llm_call(
-                round((time.perf_counter() - started_at) * 1000, 2),
-                used_fallback=True,
-                estimated_tokens=estimated_tokens,
-            )
-            return self._mock(system_prompt=system_prompt, user_prompt=user_prompt)
-
-        messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "system": system_prompt,
-            "tools": tools,
-        }
-        if extra:
-            kwargs.update(extra)
-
-        try:
-            for _ in range(max_rounds):
-                resp = self._client.messages.create(messages=cast(Any, messages), **kwargs)
-                assistant_content: list[dict[str, Any]] = []
-                tool_results: list[dict[str, Any]] = []
-                text_parts: list[str] = []
-
-                for block in resp.content:
-                    block_obj = cast(Any, block)
-                    block_type = getattr(block_obj, "type", None)
-                    if block_type == "text":
-                        text_value = str(getattr(block_obj, "text", ""))
-                        assistant_content.append({"type": "text", "text": text_value})
-                        text_parts.append(text_value)
-                    elif block_type == "tool_use":
-                        tool_input = dict(getattr(block_obj, "input", {}) or {})
-                        tool_id = str(getattr(block_obj, "id", ""))
-                        tool_name = str(getattr(block_obj, "name", ""))
-                        assistant_content.append(
-                            {
-                                "type": "tool_use",
-                                "id": tool_id,
-                                "name": tool_name,
-                                "input": tool_input,
-                            }
-                        )
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool_id,
-                                "content": tool_handler(tool_name, tool_input),
-                            }
-                        )
-
-                if not tool_results:
-                    observe_llm_call(
-                        round((time.perf_counter() - started_at) * 1000, 2),
-                        used_fallback=False,
-                        estimated_tokens=estimated_tokens,
-                    )
-                    return "\n".join(text_parts).strip()
-
-                messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({"role": "user", "content": tool_results})
-        except Exception as exc:
-            logger.warning("Claude tool API failed, falling back to mock response: %s", exc)
-            observe_llm_call(
-                round((time.perf_counter() - started_at) * 1000, 2),
-                used_fallback=True,
-                estimated_tokens=estimated_tokens,
-            )
-            return self._mock(system_prompt=system_prompt, user_prompt=user_prompt)
-
-        observe_llm_call(
-            round((time.perf_counter() - started_at) * 1000, 2),
-            used_fallback=True,
-            estimated_tokens=estimated_tokens,
-        )
-        return self._mock(system_prompt=system_prompt, user_prompt=user_prompt)
 
     def _mock(self, system_prompt: str, user_prompt: str) -> str:
         # 无 key 时用于 demo：只做极简规则解析/生成，保证端到端能跑通

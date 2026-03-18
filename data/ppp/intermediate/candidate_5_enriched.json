@@ -1,71 +1,71 @@
 {
   "tool_name": "candidate_public_profile_lookup",
-  "tool_mode": "fixture_backed",
+  "tool_mode": "live_web",
   "candidate_id": "candidate_5",
-  "full_name": "E",
-  "current_employer": "Five",
-  "current_title": "Title",
+  "full_name": "Nikki Thomas",
+  "current_employer": "Magellan Financial",
+  "current_title": "Senior BDM Wholesale",
   "verified_public_snippets": [
-    "Provided task input lists E as Title at Five.",
-    "LinkedIn URL in the PPP brief is a placeholder, so live public-profile verification is still pending."
+    "Nikki Thomas, CFA - Magellan Financial Group | LinkedIn Experience: Magellan Financial Group · Education: CFA Institute · Location: Australia · 438 connections on LinkedIn. View Nikki Thomas, CFA's profile on",
+    "Magellan announces suite of exec, investment team updates - Financial Newswire There were several changes announced within Magellan’s investment team, including the departure of Head of Investments Gerald Stack after 18 years with the firm and more than 10 years in the role. Stack has also headed Magellan’s Listed Infr"
   ],
   "inferred_tenure_years": null,
-  "tenure_rationale": "Exact current-role tenure could not be verified from the controlled fixture and remains a key follow-up item.",
+  "tenure_rationale": "Exact current-role tenure could not be verified from public-web snippets and remains a manual follow-up item.",
   "likely_channel_evidence": [
-    "The title 'Title' suggests senior distribution channel responsibility."
+    "The title 'Senior BDM Wholesale' suggests client-channel responsibility, but public-web confirmation remains limited."
   ],
   "likely_experience_evidence": [
-    "Current employer/title pairing suggests relevance to funds-management client coverage at Five."
+    "Nikki Thomas, CFA - Magellan Financial Group | LinkedIn Experience: Magellan Financial Group · Education: CFA Institute · Location: Australia · 438 connections on LinkedIn. View Nikki Thomas, CFA's profile on"
   ],
-  "firm_aum_context": "Five appears to be a established market participant funds-management firm; exact AUM requires live public verification; distribution exposure inferred from the candidate's title.",
+  "firm_aum_context": "Magellan Financial appears in public-web results as an established investment or wealth platform, but exact AUM still requires direct verification.",
   "firm_context_clues": [],
   "mobility_evidence": [
-    "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified."
+    "Recent public-web snippets should be reviewed manually to confirm whether the candidate is in an authentic transition window."
   ],
   "missing_fields": [
-    "exact current-role start date",
+    "verified current-role start date",
     "verified reporting line / team size",
-    "direct evidence of platform, IFA, and superannuation coverage"
+    "direct evidence of channel revenue ownership"
   ],
   "uncertain_fields": [
-    "precise tenure estimate",
-    "channel mix breadth",
-    "current mobility intent"
+    "precise current-role tenure",
+    "precise firm AUM"
   ],
   "confidence_notes": [
-    "This enrichment run is fixture-backed and should be upgraded with live public-web verification before final submission."
+    "Live public-web research was attempted through Tavily for Nikki Thomas.",
+    "Only publicly available snippets were captured, so chronology and coverage scope may still require manual verification."
   ],
   "sources": [
     {
-      "label": "PPP task input CSV",
-      "source_type": "provided_input",
-      "url": null,
+      "label": "Nikki Thomas, CFA - Magellan Financial Group | LinkedIn",
+      "source_type": "linkedin_public",
+      "url": "https://au.linkedin.com/in/nikki-thomas-cfa-2677a680",
       "confidence": "high"
     },
     {
-      "label": "Task brief LinkedIn placeholder",
-      "source_type": "linkedin_placeholder",
-      "url": "https://example.com/5",
-      "confidence": "low"
+      "label": "Magellan announces suite of exec, investment team updates - Financial Newswire",
+      "source_type": "company_site",
+      "url": "https://financialnewswire.com.au/funds-management/magellan-announces-suite-of-exec-investment-team-updates/",
+      "confidence": "high"
     }
   ],
   "evidence": [
     {
       "category": "current_role",
-      "signal": "provided_input",
-      "snippet": "Provided task input lists E as Title at Five.",
+      "signal": "public_web_search",
+      "snippet": "Nikki Thomas, CFA - Magellan Financial Group | LinkedIn Experience: Magellan Financial Group · Education: CFA Institute · Location: Australia · 438 connections on LinkedIn. View Nikki Thomas, CFA's profile on",
       "source_labels": [
-        "PPP task input CSV"
+        "Nikki Thomas, CFA - Magellan Financial Group | LinkedIn"
       ]
     },
     {
-      "category": "mobility",
-      "signal": "uncertain",
-      "snippet": "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified.",
+      "category": "current_role",
+      "signal": "public_web_search",
+      "snippet": "Magellan announces suite of exec, investment team updates - Financial Newswire There were several changes announced within Magellan’s investment team, including the departure of Head of Investments Gerald Stack after 18 years with the firm and more than 10 years in the role. Stack has also headed Magellan’s Listed Infr",
       "source_labels": [
-        "Task brief LinkedIn placeholder"
+        "Magellan announces suite of exec, investment team updates - Financial Newswire"
       ]
     }
   ],
-  "generated_at": "2026-03-17T10:53:16.540028+00:00"
+  "generated_at": "2026-03-17T12:46:55.913773+00:00"
 }

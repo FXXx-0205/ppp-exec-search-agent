@@ -1,0 +1,88 @@
+{
+  "candidate_id": "candidate_1",
+  "candidate_input": {
+    "full_name": "Andrew Swan",
+    "current_employer": "Pendal Group",
+    "current_title": "Head of Distribution",
+    "linkedin_url": "linkedin.com/in/search"
+  },
+  "enrichment": {
+    "tool_name": "candidate_public_profile_lookup",
+    "tool_mode": "fixture_fallback",
+    "candidate_id": "candidate_1",
+    "full_name": "Andrew Swan",
+    "current_employer": "Pendal Group",
+    "current_title": "Head of Distribution",
+    "verified_public_snippets": [
+      "Provided task input lists Andrew Swan as Head of Distribution at Pendal Group.",
+      "The PPP brief indicates the LinkedIn URL is a placeholder, so live profile confirmation remains outstanding."
+    ],
+    "inferred_tenure_years": 2.6,
+    "tenure_rationale": "Estimated from the controlled fixture as an established but not long-tenured distribution leadership appointment; exact start date should be verified live.",
+    "likely_channel_evidence": [
+      "A Head of Distribution title usually implies broad responsibility across wholesale and institutional coverage.",
+      "Leadership framing suggests oversight of client-facing revenue channels rather than an individual-contributor-only remit."
+    ],
+    "likely_experience_evidence": [
+      "Current-role signal points to senior distribution leadership in funds management.",
+      "The employer/title pairing supports likely experience with adviser, platform, and institutional-facing conversations, but exact channel split remains unverified."
+    ],
+    "firm_aum_context": "Pendal Group is treated in this controlled fixture as an established Australian funds-management platform; exact AUM and product mix should be verified from live public sources before final submission.",
+    "firm_context_clues": [
+      "Established asset-management brand",
+      "Distribution function likely spans multiple client channels"
+    ],
+    "mobility_evidence": [
+      "An estimated tenure above two years may place the candidate near a reasonable review point, but live chronology is still required.",
+      "No verified public promotion history is available in the controlled fixture."
+    ],
+    "missing_fields": [
+      "exact role start date",
+      "verified team size",
+      "direct evidence of superannuation and family-office coverage"
+    ],
+    "uncertain_fields": [
+      "tenure precision",
+      "channel breadth",
+      "mobility intent"
+    ],
+    "confidence_notes": [
+      "This fixture prioritises caution over specificity and is designed to prevent unsupported claims.",
+      "Live public-web research was unavailable or failed, so the enrichment fell back to the controlled fixture."
+    ],
+    "sources": [
+      {
+        "label": "PPP task input CSV",
+        "source_type": "provided_input",
+        "url": null,
+        "confidence": "high"
+      },
+      {
+        "label": "PPP brief LinkedIn placeholder",
+        "source_type": "linkedin_placeholder",
+        "url": "linkedin.com/in/search",
+        "confidence": "low"
+      }
+    ],
+    "evidence": [
+      {
+        "category": "current_role",
+        "signal": "provided_input",
+        "snippet": "Andrew Swan is listed as Head of Distribution at Pendal Group.",
+        "source_labels": [
+          "PPP task input CSV"
+        ]
+      },
+      {
+        "category": "channel_inference",
+        "signal": "title_based_inference",
+        "snippet": "Head of Distribution typically implies responsibility across multiple revenue channels.",
+        "source_labels": [
+          "PPP task input CSV"
+        ]
+      }
+    ],
+    "generated_at": "2026-03-17T12:32:33.563547+00:00"
+  },
+  "error_message": "Claude returned invalid schema output for Andrew Swan: current_role: Field required"
+}

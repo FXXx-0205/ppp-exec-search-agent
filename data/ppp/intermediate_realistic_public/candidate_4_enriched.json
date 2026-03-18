@@ -1,0 +1,409 @@
+{
+  "tool_name": "candidate_public_profile_lookup",
+  "tool_mode": "live_web",
+  "candidate_id": "candidate_4",
+  "full_name": "Luke Cheetham",
+  "current_employer": "PM Capital",
+  "current_title": "Director Distribution",
+  "linkedin_url": "https://www.linkedin.com/in/lukektcheetham/",
+  "sources": [
+    {
+      "label": "Luke Cheetham - PM Capital Limited - LinkedIn",
+      "source_type": "linkedin_public",
+      "url": "https://au.linkedin.com/in/lukektcheetham",
+      "confidence": "high",
+      "trust_score": 0.95
+    },
+    {
+      "label": "PM Capital | LinkedIn",
+      "source_type": "linkedin_public",
+      "url": "https://au.linkedin.com/company/pm-capital",
+      "confidence": "high",
+      "trust_score": 0.95
+    },
+    {
+      "label": "PM Capital appoints distribution director - Financial Standard",
+      "source_type": "industry_biography",
+      "url": "https://www.financialstandard.com.au/news/pm-capital-appoints-distribution-director-179797838",
+      "confidence": "medium",
+      "trust_score": 0.7
+    },
+    {
+      "label": "PM Capital appoints investment sales director - Money Management",
+      "source_type": "public_web",
+      "url": "https://www.moneymanagement.com.au/pm-capital-appoints-investment-sales-director/",
+      "confidence": "low",
+      "trust_score": 0.45
+    },
+    {
+      "label": "PM Capital expands intermediary distribution team",
+      "source_type": "company_site",
+      "url": "https://www.moneymanagement.com.au/pm-capital-expands-intermediary-distribution-team/",
+      "confidence": "high",
+      "trust_score": 1.0
+    },
+    {
+      "label": "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+      "source_type": "public_web",
+      "url": "https://www.zoominfo.com/pic/pm-capital-global-opportunities-fund-ltd/95617652",
+      "confidence": "low",
+      "trust_score": 0.45
+    },
+    {
+      "label": "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+      "source_type": "public_web",
+      "url": "https://www.bloomberg.com/profile/person/23166406",
+      "confidence": "low",
+      "trust_score": 0.45
+    },
+    {
+      "label": "Luke Cheetham - Director, Distribution at Pm Capital Global ...",
+      "source_type": "public_web",
+      "url": "https://www.zoominfo.com/p/Luke-Cheetham/7450634270",
+      "confidence": "low",
+      "trust_score": 0.45
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "candidate_4_current_role_1",
+      "category": "current_role",
+      "statement": "Luke Cheetham - PM Capital Limited - LinkedIn #JasonTodd, #TenCap, #CIO, #AustralianEquities [...] ### Stephen Owen CFP® National Service Financial ### Steven Parry Perpetual Limited ### Todd Kardash New directions Inc ### Paul Harrop Ex - PSK ### Michael Winter Victorian Managed Insurance Authority ### Andrew Rasby Or",
+      "verification_status": "verified",
+      "confidence": "high",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "role_fit",
+        "current_role",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_current_role_2",
+      "category": "current_role",
+      "statement": "PM Capital | LinkedIn Livewire Markets to discuss the “structural reset of the global economy” and opportunities we are seeing. [Likes: 12, Comments: 0]; PM Capital (3mo): A huge thank you to the Ensombl team for putting on another fantastic All Licensee PD Day. Our Head of Retail Distribution, Luke Cheetham , and Port",
+      "verification_status": "verified",
+      "confidence": "medium",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "role_fit",
+        "current_role",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_tenure_1",
+      "category": "tenure",
+      "statement": "Exact current-role tenure could not be verified from public-web snippets and remains a manual follow-up item.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "mobility_signal",
+        "current_role"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_channel_1",
+      "category": "channel_experience",
+      "statement": "PM Capital | LinkedIn Livewire Markets to discuss the “structural reset of the global economy” and opportunities we are seeing. [Likes: 12, Comments: 0]; PM Capital (3mo): A huge thank you to the Ensombl team for putting on another fantastic All Licensee PD Day. Our Head of Retail Distribution, Luke Cheetham , and Port",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_channel_2",
+      "category": "channel_experience",
+      "statement": "PM Capital appoints distribution director - Financial Standard | | | | | | | | | | --- --- --- --- | | | | | | | --- --- | | Executive Appointments | | | | --- | | | | | | | | | --- | | | | | Sign up FS Industry Moves PM Capital appoints distribution directorBY ELIZABETH FRY | FRIDAY, 9 DEC 2022 12:15PM The former gene",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_experience_1",
+      "category": "experience",
+      "statement": "Luke Cheetham - PM Capital Limited - LinkedIn #JasonTodd, #TenCap, #CIO, #AustralianEquities [...] ### Stephen Owen CFP® National Service Financial ### Steven Parry Perpetual Limited ### Todd Kardash New directions Inc ### Paul Harrop Ex - PSK ### Michael Winter Victorian Managed Insurance Authority ### Andrew Rasby Or",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_experience_2",
+      "category": "experience",
+      "statement": "PM Capital | LinkedIn Livewire Markets to discuss the “structural reset of the global economy” and opportunities we are seeing. [Likes: 12, Comments: 0]; PM Capital (3mo): A huge thank you to the Ensombl team for putting on another fantastic All Licensee PD Day. Our Head of Retail Distribution, Luke Cheetham , and Port",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_firm_context_1",
+      "category": "firm_context",
+      "statement": "PM Capital appears in public-web results as an established investment or wealth platform, but exact AUM still requires direct verification.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "firm_aum_context",
+        "career_narrative",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_mobility_1",
+      "category": "mobility",
+      "statement": "Recent public-web snippets should be reviewed manually to confirm whether the candidate is in an authentic transition window.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "mobility_signal",
+        "outreach_hook",
+        "career_narrative"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_verification_10",
+      "category": "verification_boundary",
+      "statement": "precise current-role tenure remains uncertain and should be framed cautiously.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_verification_11",
+      "category": "verification_boundary",
+      "statement": "precise firm AUM remains uncertain and should be framed cautiously.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_verification_12",
+      "category": "verification_boundary",
+      "statement": "verified current-role start date is not yet verified from available public research.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_verification_13",
+      "category": "verification_boundary",
+      "statement": "verified reporting line / team size is not yet verified from available public research.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_4_verification_14",
+      "category": "verification_boundary",
+      "statement": "direct evidence of channel revenue ownership is not yet verified from available public research.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Luke Cheetham - PM Capital Limited - LinkedIn",
+        "PM Capital | LinkedIn",
+        "PM Capital appoints distribution director - Financial Standard",
+        "PM Capital appoints investment sales director - Money Management",
+        "PM Capital expands intermediary distribution team",
+        "Pm Capital Global Opportunities Fund: Employee Directory - ZoomInfo",
+        "Luke Cheetham, PM Capital Pty Ltd: Profile and Biography",
+        "Luke Cheetham - Director, Distribution at Pm Capital Global ..."
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    }
+  ],
+  "verification": {
+    "missing_fields": [
+      "verified current-role start date",
+      "verified reporting line / team size",
+      "direct evidence of channel revenue ownership"
+    ],
+    "uncertain_fields": [
+      "precise current-role tenure",
+      "precise firm AUM"
+    ],
+    "confidence_notes": [
+      "Live public-web research was attempted through Tavily for Luke Cheetham.",
+      "Only publicly available snippets were captured, so chronology and coverage scope may still require manual verification."
+    ]
+  },
+  "recruiter_signals": {
+    "channel_orientation": "retail",
+    "mandate_similarity": "adjacent_match",
+    "key_sell_points": [
+      "current title already signals senior distribution ownership",
+      "public evidence supports retail channel relevance"
+    ],
+    "key_gaps": [
+      "precise current-role tenure remains unclear",
+      "precise firm AUM remains unclear"
+    ]
+  },
+  "generated_at": "2026-03-18T03:07:33.625067+00:00"
+}

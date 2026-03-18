@@ -54,6 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fixture-backed public research source for the PPP enrichment tool.",
     )
     parser.add_argument(
+        "--research-mode",
+        default=None,
+        choices=["fixture", "live", "auto"],
+        help="PPP enrichment research mode: fixture-only, live public-web lookup, or auto with fixture fallback.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -96,6 +102,7 @@ def main() -> int:
             model=args.model,
             intermediate_dir=args.intermediate_dir,
             research_fixture_path=args.research_fixtures,
+            research_mode=args.research_mode,
         )
     except PPPTaskError as exc:
         logging.error("%s", exc)

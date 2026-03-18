@@ -8,6 +8,21 @@ GENERIC_TEMPLATE_PHRASES = (
     "directionally aligned",
     "highly relevant to a current search mandate",
     "looks relevant to a leadership search we are currently running",
+    "credible angle",
+    "adjacent transferability",
+    "keeps this profile in frame as a",
+    "should be handled as strong evidence until tested",
+    "distribution distribution",
+    "a established",
+    "what stood out was",
+    "anchored in",
+    "adjacent option",
+    "appears relevant",
+    "currently sitting in",
+    "from a recruiter lens, the relevance comes from",
+    "that puts the profile close to the",
+    "the main commercial gap is",
+    "the first screening question is",
 )
 
 

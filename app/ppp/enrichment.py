@@ -15,6 +15,9 @@ VerificationStatus = Literal["verified", "strongly_inferred", "uncertain"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 ChannelOrientation = Literal["institutional", "wholesale", "wealth", "retail", "mixed", "unclear"]
 MandateSimilarity = Literal["direct_match", "adjacent_match", "step_up_candidate", "unclear_fit"]
+ScopeSignal = Literal["national", "anz", "global", "regional", "unclear"]
+SenioritySignal = Literal["head_level", "director_level", "bdm_level", "unclear"]
+EvidenceStrength = Literal["strong", "moderate", "thin"]
 
 QUALIFIER_TERMS = ("unverified", "verification", "estimated", "limited public visibility", "cautious", "approx", "verify")
 
@@ -95,14 +98,26 @@ class CandidatePublicProfileLookupInput(BaseModel):
 class RecruiterSignals(BaseModel):
     channel_orientation: ChannelOrientation
     mandate_similarity: MandateSimilarity
+    scope_signal: ScopeSignal
+    seniority_signal: SenioritySignal
+    evidence_strength: EvidenceStrength
     key_sell_points: list[str] = Field(default_factory=list)
     key_gaps: list[str] = Field(default_factory=list)
+    screening_priority_question: str
 
     @field_validator("key_sell_points", "key_gaps")
     @classmethod
     def _limit_signal_lists(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip() for item in value if item and item.strip()]
         return cleaned[:2]
+
+    @field_validator("screening_priority_question")
+    @classmethod
+    def _require_screening_question(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Field cannot be empty.")
+        return normalized
 
 
 class CandidateEnrichmentResult(BaseModel):
@@ -172,7 +187,7 @@ class CandidateEnrichmentResult(BaseModel):
             firm_context_mode = "numeric_or_qualitative"
 
         tenure_range = None
-        if self.inferred_tenure_years is not None:
+        if self.inferred_tenure_years is not None and self.inferred_tenure_years >= 0:
             tenure_range = [
                 round(max(0.0, self.inferred_tenure_years - 0.5), 1),
                 round(self.inferred_tenure_years + 0.5, 1),
@@ -413,8 +428,8 @@ class CandidatePublicProfileLookupTool:
                 claim_id=f"{tool_input.candidate_id}_tenure_1",
                 category="tenure",
                 statement=tenure_rationale,
-                verification_status="strongly_inferred" if inferred_tenure_years is not None else "uncertain",
-                confidence="medium" if inferred_tenure_years is not None else "low",
+                verification_status="strongly_inferred" if inferred_tenure_years is not None and inferred_tenure_years >= 0 else "uncertain",
+                confidence="medium" if inferred_tenure_years is not None and inferred_tenure_years >= 0 else "low",
                 source_labels=primary_source,
                 supports_output_fields=["career_narrative", "mobility_signal", "current_role"],
                 numeric_value=inferred_tenure_years,
@@ -540,27 +555,26 @@ class CandidatePublicProfileLookupTool:
             today = datetime.now(UTC)
             months = max(1, (today.year - start_year) * 12 + (today.month - int(start_month)))
             return round(months / 12.0, 1)
-        return None
+        return -1.0
 
     def _build_tenure_rationale(self, fixture: dict[str, Any], tenure_years: float | None) -> str:
         if isinstance(fixture.get("tenure_rationale"), str) and fixture["tenure_rationale"].strip():
             return fixture["tenure_rationale"].strip()
-        if tenure_years is not None:
+        if tenure_years is not None and tenure_years >= 0:
             return f"Estimated at approximately {tenure_years:.1f} years based on controlled research chronology."
-        return "Exact current-role tenure could not be verified from available public research and remains a key follow-up item."
+        return "Tenure mapped to placeholder (-1.0) as public chronology is unavailable."
 
     def _format_firm_aum_context(self, employer: str, fixture: dict[str, Any]) -> str:
         if isinstance(fixture.get("firm_aum_context"), str) and fixture["firm_aum_context"].strip():
             return fixture["firm_aum_context"].strip()
 
-        employer_type = fixture.get("employer_type", "funds-management firm")
-        market_position = fixture.get("market_position", "established market participant")
-        aum_descriptor = fixture.get("aum_descriptor", "unable to verify exact AUM from public sources")
+        employer_type = fixture.get("employer_type", "funds-management platform")
+        market_position = fixture.get("market_position", "established")
         channel_focus = fixture.get("channel_focus", "distribution exposure inferred from the candidate's title")
         return (
             f"Unable to verify exact AUM from public sources for {employer}; "
-            f"based on firm type and sector context, the platform appears broadly comparable to a {market_position} {employer_type}; "
-            f"{aum_descriptor}; {channel_focus}."
+            f"based on firm type and sector context, {employer} appears to be an {market_position} {employer_type}; "
+            f"{channel_focus}."
         )
 
     def _load_fixtures(self, path: Path) -> dict[str, dict[str, Any]]:
@@ -596,19 +610,49 @@ def derive_recruiter_signals(
     verification: VerificationSummary,
 ) -> RecruiterSignals:
     channel_orientation = _derive_channel_orientation(tool_input=tool_input, claims=claims)
-    mandate_similarity = _derive_mandate_similarity(tool_input=tool_input, claims=claims, channel_orientation=channel_orientation)
+    scope_signal = _derive_scope_signal(tool_input=tool_input, claims=claims)
+    seniority_signal = _derive_seniority_signal(tool_input=tool_input)
+    evidence_strength = _derive_evidence_strength(claims=claims)
+    mandate_similarity = _derive_mandate_similarity(
+        tool_input=tool_input,
+        claims=claims,
+        channel_orientation=channel_orientation,
+        scope_signal=scope_signal,
+        seniority_signal=seniority_signal,
+        evidence_strength=evidence_strength,
+    )
     key_sell_points = _derive_key_sell_points(
         tool_input=tool_input,
         claims=claims,
         channel_orientation=channel_orientation,
         mandate_similarity=mandate_similarity,
+        scope_signal=scope_signal,
+        seniority_signal=seniority_signal,
     )
-    key_gaps = _derive_key_gaps(verification=verification)
+    key_gaps = _derive_key_gaps(
+        tool_input=tool_input,
+        claims=claims,
+        verification=verification,
+        channel_orientation=channel_orientation,
+        scope_signal=scope_signal,
+        seniority_signal=seniority_signal,
+        evidence_strength=evidence_strength,
+    )
+    screening_priority_question = _derive_screening_priority_question(
+        key_gaps=key_gaps,
+        channel_orientation=channel_orientation,
+        scope_signal=scope_signal,
+        seniority_signal=seniority_signal,
+    )
     return RecruiterSignals(
         channel_orientation=channel_orientation,
         mandate_similarity=mandate_similarity,
+        scope_signal=scope_signal,
+        seniority_signal=seniority_signal,
+        evidence_strength=evidence_strength,
         key_sell_points=key_sell_points,
         key_gaps=key_gaps,
+        screening_priority_question=screening_priority_question,
     )
 
 
@@ -646,30 +690,48 @@ def _derive_channel_orientation(
     tool_input: CandidatePublicProfileLookupInput,
     claims: list[ResearchClaim],
 ) -> ChannelOrientation:
-    explicit_categories: list[ChannelOrientation] = []
-    inferred_categories: list[ChannelOrientation] = []
+    scores = {key: 0 for key in ("institutional", "wholesale", "wealth", "retail")}
+    title = tool_input.current_title.lower()
+    relevant_claims = [claim for claim in claims if claim.category in {"current_role", "channel_experience", "experience"}]
+    claim_text = " ".join(claim.statement.lower() for claim in relevant_claims)
+    explicit_categories: set[ChannelOrientation] = set()
 
-    title_categories = _extract_channel_categories(tool_input.current_title)
-    if title_categories:
-        explicit_categories.extend(title_categories)
+    for category in _extract_channel_categories(title):
+        scores[category] += 4
+        explicit_categories.add(category)
 
-    for claim in claims:
+    for claim in relevant_claims:
         text = claim.statement.lower()
         categories = _extract_channel_categories(text)
         if not categories:
             continue
-        if claim.category in {"channel_experience", "current_role"}:
-            explicit_categories.extend(categories)
-        elif claim.category in {"experience", "firm_context"}:
-            inferred_categories.extend(categories)
+        weight = 3 if claim.category in {"channel_experience", "current_role"} else 2
+        for category in categories:
+            scores[category] += weight
+            if claim.category in {"channel_experience", "current_role"}:
+                explicit_categories.add(category)
 
-    chosen = explicit_categories or inferred_categories
-    unique = sorted(set(chosen))
-    if not unique:
-        return "unclear"
-    if len(unique) > 1:
+    if "ifa" in claim_text or "adviser" in claim_text or "intermediary" in claim_text or "platform" in claim_text:
+        scores["wholesale"] += 2
+    if "wealth management" in claim_text or "private wealth" in claim_text:
+        scores["wealth"] += 2
+    if "super" in claim_text or "institutional" in claim_text or "consultant" in claim_text:
+        scores["institutional"] += 2
+    if "retail" in claim_text:
+        scores["retail"] += 2
+
+    if len(explicit_categories) >= 2:
         return "mixed"
-    return unique[0]
+
+    ranked = sorted(((score, category) for category, score in scores.items() if score > 0), reverse=True)
+    if ranked:
+        if len(ranked) > 1 and ranked[0][0] - ranked[1][0] <= 1:
+            return "mixed"
+        return ranked[0][1]
+
+    if "distribution" in title or "marketing" in title:
+        return "mixed"
+    return "unclear"
 
 
 def _extract_channel_categories(text: str) -> list[ChannelOrientation]:
@@ -691,27 +753,36 @@ def _derive_mandate_similarity(
     tool_input: CandidatePublicProfileLookupInput,
     claims: list[ResearchClaim],
     channel_orientation: ChannelOrientation,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
+    evidence_strength: EvidenceStrength,
 ) -> MandateSimilarity:
     title = tool_input.current_title.lower()
     claim_text = " ".join(claim.statement.lower() for claim in claims if claim.category in {"current_role", "channel_experience", "experience"})
 
     has_head_distribution = "head of distribution" in title
     has_national_bdm = "national bdm" in title
-    has_head_sales = "head of sales" in title or "head of retail sales" in title or "head of wholesale" in title
+    has_head_sales = "head of sales" in title or "head of retail sales" in title or "head of wholesale" in title or "head of wealth" in title
     has_distribution_lead = "distribution" in title and any(term in title for term in ("head", "director", "lead"))
     has_channel_lead = any(term in title for term in ("director", "head", "lead")) and any(
         term in title for term in ("institutional", "wholesale", "wealth", "retail")
     )
     has_bdm = "bdm" in title or "business development manager" in title
-    seniority_head_or_director = any(term in title for term in ("head", "director", "lead"))
+    head_scope = scope_signal in {"national", "anz", "global", "regional"}
 
-    if has_head_distribution or has_national_bdm:
+    if evidence_strength == "thin" and seniority_signal == "unclear":
+        return "unclear_fit"
+    if has_head_distribution and seniority_signal == "head_level":
         return "direct_match"
-    if has_distribution_lead and channel_orientation == "mixed":
+    if has_national_bdm:
         return "direct_match"
-    if has_head_sales or has_channel_lead or ("distribution" in claim_text and seniority_head_or_director):
+    if seniority_signal == "head_level" and has_distribution_lead and (channel_orientation != "unclear" or head_scope):
+        return "direct_match"
+    if seniority_signal == "head_level" and channel_orientation in {"institutional", "wholesale", "wealth", "retail", "mixed"}:
         return "adjacent_match"
-    if has_bdm or ("manager" in title and channel_orientation != "unclear"):
+    if has_head_sales or has_channel_lead or ("distribution" in claim_text and seniority_signal in {"head_level", "director_level"}):
+        return "adjacent_match"
+    if has_bdm or seniority_signal == "bdm_level" or ("manager" in title and channel_orientation != "unclear"):
         return "step_up_candidate"
     return "unclear_fit"
 
@@ -722,73 +793,323 @@ def _derive_key_sell_points(
     claims: list[ResearchClaim],
     channel_orientation: ChannelOrientation,
     mandate_similarity: MandateSimilarity,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
 ) -> list[str]:
     sell_points: list[str] = []
-    title = tool_input.current_title.lower()
-    claim_text = " ".join(claim.statement.lower() for claim in claims)
-
-    if any(term in title for term in ("head", "director", "lead", "national bdm")):
-        sell_points.append("current title already signals senior distribution ownership")
+    has_supported_firm_context = any(claim.category == "firm_context" and claim.verification_status != "uncertain" for claim in claims)
 
     if channel_orientation != "unclear":
-        sell_points.append(f"public evidence supports {channel_orientation} channel relevance")
+        if seniority_signal == "head_level":
+            sell_points.append(f"current remit sits in {channel_orientation} distribution leadership")
+        elif seniority_signal == "director_level":
+            sell_points.append(f"current remit is anchored in senior {channel_orientation} coverage")
+        else:
+            sell_points.append(f"current remit is anchored in {channel_orientation} distribution")
+    elif "distribution" in tool_input.current_title.lower():
+        sell_points.append("current title points to broad distribution leadership exposure")
 
-    if (
-        mandate_similarity in {"direct_match", "adjacent_match"}
-        and any(claim.category == "firm_context" and claim.verification_status != "uncertain" for claim in claims)
-    ):
-        sell_points.append("employer context is comparable to the target mandate")
+    if scope_signal != "unclear":
+        sell_points.append(f"public evidence points to {_scope_phrase(scope_signal)} scope")
 
-    if (
-        mandate_similarity == "step_up_candidate"
-        and any(term in claim_text for term in ("distribution", "institutional", "wholesale", "wealth", "retail"))
-    ):
-        sell_points.append("visible public remit suggests exposure to distribution leadership themes")
+    if mandate_similarity == "direct_match":
+        sell_points.append("the remit already sits close to a head-of-distribution brief")
+    elif mandate_similarity == "adjacent_match" and has_supported_firm_context:
+        sell_points.append(f"{tool_input.current_employer} platform context is commercially relevant to the brief")
+    elif mandate_similarity == "step_up_candidate":
+        sell_points.append("the profile suggests stretch potential from channel ownership into broader distribution leadership")
 
-    deduped: list[str] = []
-    for point in sell_points:
-        if point not in deduped:
-            deduped.append(point)
-    return deduped[:2]
+    return _dedupe_preserve_order(sell_points)[:2]
 
 
-def _derive_key_gaps(*, verification: VerificationSummary) -> list[str]:
+def _derive_key_gaps(
+    *,
+    tool_input: CandidatePublicProfileLookupInput,
+    claims: list[ResearchClaim],
+    verification: VerificationSummary,
+    channel_orientation: ChannelOrientation,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
+    evidence_strength: EvidenceStrength,
+) -> list[str]:
     prioritized_fields = verification.uncertain_fields + verification.missing_fields
-    gaps: list[str] = []
+    high_value_gaps: list[str] = []
+    low_value_gaps: list[str] = []
     for field in prioritized_fields:
-        normalized = _normalize_gap(field)
-        if normalized and normalized not in gaps:
-            gaps.append(normalized)
-        if len(gaps) == 2:
-            break
-    if not gaps:
-        return ["public scope details remain unclear"]
-    return gaps
+        if "mobility" in field.lower():
+            continue
+        normalized = _normalize_gap(
+            field,
+            tool_input=tool_input,
+            claims=claims,
+            channel_orientation=channel_orientation,
+            scope_signal=scope_signal,
+            seniority_signal=seniority_signal,
+        )
+        if not normalized:
+            continue
+        if _is_low_value_gap(normalized) or _is_deprioritized_gap(normalized, channel_orientation=channel_orientation):
+            low_value_gaps.append(normalized)
+        else:
+            high_value_gaps.append(normalized)
+
+    if not high_value_gaps:
+        fallback_gap = _fallback_commercial_gap(
+            tool_input=tool_input,
+            claims=claims,
+            channel_orientation=channel_orientation,
+            scope_signal=scope_signal,
+            seniority_signal=seniority_signal,
+            evidence_strength=evidence_strength,
+        )
+        if fallback_gap:
+            high_value_gaps.append(fallback_gap)
+
+    combined = _dedupe_preserve_order(high_value_gaps + low_value_gaps)
+    return (combined or ["commercial scope behind the title remains unclear"])[:2]
 
 
-def _normalize_gap(field: str) -> str:
+def _normalize_gap(
+    field: str,
+    *,
+    tool_input: CandidatePublicProfileLookupInput,
+    claims: list[ResearchClaim],
+    channel_orientation: ChannelOrientation,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
+) -> str:
     lowered = field.strip().lower()
+    lane = "channel" if channel_orientation == "unclear" else channel_orientation
+    geography = _market_phrase(scope_signal)
+    title = tool_input.current_title.lower()
+    claim_text = " ".join(claim.statement.lower() for claim in claims if claim.category in {"current_role", "channel_experience", "experience"})
     mapping = (
-        ("team size", "team scale not verified"),
-        ("reporting line", "reporting line not verified"),
-        ("superannuation", "superannuation coverage depth not verified"),
-        ("family-office", "family-office coverage depth not verified"),
-        ("family office", "family-office coverage depth not verified"),
-        ("ifa", "IFA coverage depth not verified"),
-        ("platform", "platform coverage depth not verified"),
+        ("team size", "team leadership scale behind the remit is not verified publicly"),
+        ("team scale", "team leadership scale behind the remit is not verified publicly"),
+        ("reporting line", "whether the role has included direct team leadership or mainly individual channel ownership is not verified publicly"),
+        ("direct evidence of platform, ifa, and superannuation coverage", "how much direct platform, IFA, and super-fund coverage sits behind the remit is not verified publicly"),
+        ("superannuation", "super fund coverage depth is not verified publicly"),
+        ("family-office", "family-office coverage depth is not verified publicly"),
+        ("family office", "family-office coverage depth is not verified publicly"),
+        ("ifa", "IFA coverage depth is not verified publicly"),
+        ("platform", "platform coverage depth is not verified publicly"),
         ("asset class", "product breadth across asset classes remains unclear"),
         ("product breadth", "product breadth across asset classes remains unclear"),
-        ("institutional coverage", "direct institutional coverage still needs confirmation"),
-        ("channel mix breadth", "channel breadth remains unclear"),
-        ("channel breadth", "channel breadth remains unclear"),
-        ("network depth", "network depth is not verified publicly"),
+        ("institutional coverage", f"direct {geography} institutional network depth is not verified publicly"),
+        ("wholesale coverage", f"direct {geography} wholesale/intermediary coverage depth is not verified publicly"),
+        ("wealth coverage", f"direct {geography} wealth channel coverage depth is not verified publicly"),
+        ("retail coverage", f"direct {geography} retail channel coverage depth is not verified publicly"),
+        ("channel mix breadth", _mixed_or_lane_gap(channel_orientation=channel_orientation, scope_signal=scope_signal, seniority_signal=seniority_signal)),
+        ("channel breadth", _mixed_or_lane_gap(channel_orientation=channel_orientation, scope_signal=scope_signal, seniority_signal=seniority_signal)),
+        ("network depth", f"direct {geography} {lane} network depth is not verified publicly"),
+        ("market profile", f"{geography.capitalize()} market profile behind the title is not verified publicly"),
         ("tenure", "precise current-role tenure remains unclear"),
+        ("start date", "exact current-role start date remains unclear"),
+        ("aum", "exact firm AUM remains unclear"),
     )
     for needle, label in mapping:
         if needle in lowered:
             return label
+    if seniority_signal in {"head_level", "director_level"} and ("distribution" in title or "distribution" in claim_text):
+        if channel_orientation == "wealth":
+            return "whether the remit is primarily wealth-led or extends into broader intermediary and institutional coverage remains unclear"
+        if channel_orientation == "wholesale":
+            return "how much direct platform, IFA, and broader institutional coverage sits behind the remit is not verified publicly"
+        if channel_orientation == "institutional":
+            return f"how much direct {geography} institutional and super-fund coverage sits behind the remit is not verified publicly"
+        if channel_orientation == "mixed":
+            return "whether the role is mainly strategic oversight or still hands-on across key channels is not verified publicly"
+        return "whether the role is mainly strategic oversight or hands-on channel leadership is not verified publicly"
     if lowered.endswith("verified"):
         return lowered
     if lowered.endswith("unclear"):
         return lowered
     return f"{field.strip()} remains unclear"
+
+
+def _derive_scope_signal(
+    *,
+    tool_input: CandidatePublicProfileLookupInput,
+    claims: list[ResearchClaim],
+) -> ScopeSignal:
+    relevant_claims = [
+        claim.statement.lower()
+        for claim in claims
+        if claim.category in {"current_role", "channel_experience", "experience", "firm_context"}
+    ]
+    text = " ".join([tool_input.current_title.lower(), *relevant_claims])
+    if any(term in text for term in ("global ", "global-", "worldwide", "international")):
+        return "global"
+    if any(term in text for term in ("anz", "australia and new zealand", "australia & new zealand")):
+        return "anz"
+    if any(term in text for term in ("apac", "asia pacific", "asia-pacific", "emea", "regional")):
+        return "regional"
+    if any(term in text for term in ("national", "australia", "australian")):
+        return "national"
+    if any(term in tool_input.current_title.lower() for term in ("head of distribution", "distribution director", "director distribution", "head of sales", "national bdm")):
+        return "national"
+    return "unclear"
+
+
+def _derive_seniority_signal(*, tool_input: CandidatePublicProfileLookupInput) -> SenioritySignal:
+    title = tool_input.current_title.lower()
+    if any(term in title for term in ("chief", "global head", "regional head", "head ")):
+        return "head_level"
+    if any(term in title for term in ("managing director", "executive director", "director", "lead ")):
+        return "director_level"
+    if "bdm" in title or "business development manager" in title:
+        return "bdm_level"
+    if "manager" in title and any(term in title for term in ("distribution", "sales", "coverage", "relationship")):
+        return "bdm_level"
+    return "unclear"
+
+
+def _derive_evidence_strength(*, claims: list[ResearchClaim]) -> EvidenceStrength:
+    remit_claims = [claim for claim in claims if claim.category in {"current_role", "channel_experience", "experience", "firm_context"}]
+    strong_count = sum(claim.verification_status in {"verified", "strongly_inferred"} for claim in remit_claims)
+    verified_count = sum(claim.verification_status == "verified" for claim in remit_claims)
+    if verified_count >= 1 and strong_count >= 3:
+        return "strong"
+    if strong_count >= 2:
+        return "moderate"
+    return "thin"
+
+
+def _derive_screening_priority_question(
+    *,
+    key_gaps: list[str],
+    channel_orientation: ChannelOrientation,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
+) -> str:
+    primary_gap = key_gaps[0] if key_gaps else ""
+    lane = _lane_question_label(channel_orientation)
+    geography = _market_phrase(scope_signal)
+    if "network depth" in primary_gap:
+        return f"How much direct {geography} {lane} network depth sits behind the current title?"
+    if "team leadership scale" in primary_gap or "reporting line" in primary_gap:
+        return "Has the role included direct leadership of a sales or distribution team, or mainly individual channel ownership?"
+    if "super fund" in primary_gap:
+        return "How much direct superannuation coverage has sat inside the remit in practice?"
+    if "ifa" in primary_gap:
+        return "How much direct IFA coverage has sat inside the remit in practice?"
+    if "platform" in primary_gap:
+        return "How much direct platform coverage has sat inside the remit in practice?"
+    if "product breadth" in primary_gap:
+        return "How broad is the product set behind the candidate's distribution remit?"
+    if "platform, ifa, and super-fund" in primary_gap:
+        return "How much direct platform, IFA, and superannuation coverage sits behind the current remit?"
+    if "wealth-led" in primary_gap:
+        return "Is the candidate's strength primarily wealth and intermediary-led, or does it extend into institutional coverage as well?"
+    if "platform, ifa" in primary_gap:
+        return "How much direct platform and IFA coverage sits behind the remit, and does it extend into institutional relationships as well?"
+    if "institutional and super-fund" in primary_gap:
+        return "How much direct institutional and superannuation coverage sits behind the current remit?"
+    if "hands-on channel ownership or broader team leadership" in primary_gap:
+        return "Has the role been mainly hands-on channel ownership, or has it already included broader team leadership?"
+    if "hands-on the role remains versus broad strategic oversight" in primary_gap:
+        return "How hands-on is the remit today versus broad strategic oversight across the channel mix?"
+    if "strategic oversight" in primary_gap:
+        return "Is the role mainly strategic oversight, or is the candidate still hands-on in channel leadership day to day?"
+    if "multi-channel coverage" in primary_gap:
+        return f"Is the candidate strongest in {lane}, or has the remit genuinely stretched across multiple channels?"
+    if "market profile" in primary_gap:
+        return f"How established is the candidate's {geography} market profile with allocators and intermediaries?"
+    if "scope" in primary_gap:
+        return "Was the remit national, ANZ, or narrower in practice?"
+    if seniority_signal == "bdm_level":
+        return "Has the remit already stretched beyond channel ownership into broader leadership scope?"
+    return "What is the first commercial point that needs verifying behind the current remit?"
+
+
+def _fallback_commercial_gap(
+    *,
+    tool_input: CandidatePublicProfileLookupInput,
+    claims: list[ResearchClaim],
+    channel_orientation: ChannelOrientation,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
+    evidence_strength: EvidenceStrength,
+) -> str:
+    text = " ".join(claim.statement.lower() for claim in claims if claim.category in {"channel_experience", "experience", "current_role"})
+    geography = _market_phrase(scope_signal)
+    lane = _lane_question_label(channel_orientation)
+    if evidence_strength == "thin":
+        if channel_orientation == "wealth":
+            return "whether the profile is mainly wealth-led or broader than wealth distribution remains unclear"
+        if channel_orientation == "wholesale":
+            return "how much direct platform, IFA, and broader institutional coverage sits behind the title is not verified publicly"
+        if channel_orientation == "institutional":
+            return f"how much direct {geography} institutional and super-fund coverage sits behind the title is not verified publicly"
+        if channel_orientation != "unclear":
+            return f"how much direct {geography} {lane} coverage sits behind the title is not verified publicly"
+        return "commercial scope behind the title remains unclear"
+    if seniority_signal in {"head_level", "director_level"} and "team" not in text:
+        return "team leadership scale behind the remit is not verified publicly"
+    if scope_signal == "unclear":
+        return "whether the remit is national, ANZ, or narrower remains unclear"
+    return f"how much direct {geography} {lane} coverage sits behind the remit is not verified publicly"
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value and value not in deduped:
+            deduped.append(value)
+    return deduped
+
+
+def _is_low_value_gap(gap: str) -> bool:
+    lowered = gap.lower()
+    return "aum" in lowered or "start date" in lowered or "tenure" in lowered
+
+
+def _is_deprioritized_gap(gap: str, *, channel_orientation: ChannelOrientation) -> bool:
+    lowered = gap.lower()
+    return channel_orientation == "mixed" and "multi-channel coverage" in lowered
+
+
+def _scope_phrase(scope_signal: ScopeSignal) -> str:
+    mapping = {
+        "national": "national",
+        "anz": "ANZ",
+        "global": "global",
+        "regional": "regional",
+        "unclear": "unclear",
+    }
+    return mapping[scope_signal]
+
+
+def _market_phrase(scope_signal: ScopeSignal) -> str:
+    mapping = {
+        "national": "australian",
+        "anz": "anz",
+        "global": "global",
+        "regional": "regional",
+        "unclear": "market",
+    }
+    return mapping[scope_signal]
+
+
+def _lane_question_label(channel_orientation: ChannelOrientation) -> str:
+    if channel_orientation == "mixed":
+        return "distribution"
+    if channel_orientation == "unclear":
+        return "channel"
+    return channel_orientation
+
+
+def _mixed_or_lane_gap(
+    *,
+    channel_orientation: ChannelOrientation,
+    scope_signal: ScopeSignal,
+    seniority_signal: SenioritySignal,
+) -> str:
+    lane = "channel" if channel_orientation == "unclear" else channel_orientation
+    if channel_orientation == "mixed":
+        if seniority_signal == "director_level":
+            return "whether the remit is mainly hands-on channel ownership or broader team leadership is not verified publicly"
+        if seniority_signal == "head_level" and scope_signal == "global":
+            return "how hands-on the role remains versus broad strategic oversight is not verified publicly"
+        return "how much direct platform, IFA, and super-fund coverage sits behind the remit is not verified publicly"
+    return f"how much {lane} versus broader multi-channel coverage sits behind the remit remains unclear"

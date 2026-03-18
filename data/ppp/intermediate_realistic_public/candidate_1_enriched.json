@@ -1,0 +1,384 @@
+{
+  "tool_name": "candidate_public_profile_lookup",
+  "tool_mode": "live_web",
+  "candidate_id": "candidate_1",
+  "full_name": "Anthony Serhan",
+  "current_employer": "Pendal Group",
+  "current_title": "Distribution Director",
+  "linkedin_url": "https://www.linkedin.com/in/anthony-serhan-cfa-b6956510/",
+  "sources": [
+    {
+      "label": "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+      "source_type": "linkedin_public",
+      "url": "https://au.linkedin.com/in/anthony-serhan-cfa-b6956510",
+      "confidence": "high",
+      "trust_score": 0.95
+    },
+    {
+      "label": "Pendal appoints head of distribution - Financial Standard",
+      "source_type": "industry_biography",
+      "url": "https://www.financialstandard.com.au/news/pendal-appoints-head-of-distribution-125646527?q=%22Trend%22",
+      "confidence": "medium",
+      "trust_score": 0.7
+    },
+    {
+      "label": "Speaker Profiles - SPARK Institute",
+      "source_type": "public_web",
+      "url": "https://www.sparkinstitute.org/https-www-sparkinstitute-org-spark-dciia-public-policy-event-series-2021-june-speaker-profiles/",
+      "confidence": "low",
+      "trust_score": 0.45
+    },
+    {
+      "label": "Team Members Archive | Pendal Group",
+      "source_type": "public_web",
+      "url": "https://pendalgroup.com/our-people",
+      "confidence": "low",
+      "trust_score": 0.45
+    },
+    {
+      "label": "Our People - Team Members Archive | Pendal Group",
+      "source_type": "company_site",
+      "url": "https://pendalgroup.com/about/our-people/senior-management",
+      "confidence": "high",
+      "trust_score": 1.0
+    },
+    {
+      "label": "Pendal Group Ltd Company Profile - Overview - GlobalData",
+      "source_type": "company_site",
+      "url": "https://www.globaldata.com/company-profile/pendal-group-ltd/",
+      "confidence": "high",
+      "trust_score": 1.0
+    },
+    {
+      "label": "Pendal hires former Morningstar CEO - Investor Daily",
+      "source_type": "public_web",
+      "url": "https://www.investordaily.com.au/former-morningstar-australia-ceo-named-pendal-executive/",
+      "confidence": "low",
+      "trust_score": 0.45
+    },
+    {
+      "label": "Pendal Group Information - RocketReach",
+      "source_type": "public_web",
+      "url": "https://rocketreach.co/pendal-group-profile_b4574073fca51a24",
+      "confidence": "low",
+      "trust_score": 0.45
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "candidate_1_current_role_1",
+      "category": "current_role",
+      "statement": "Anthony Serhan, CFA - Distribution Director at Perpetual Group Experience ; Distribution Director. Perpetual Group. Mar 2023 ; Distribution Director. Pendal Group. Oct 2018 ; Director. CFA Society of Sydney. Oct 2011 ; Director.",
+      "verification_status": "verified",
+      "confidence": "high",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "role_fit",
+        "current_role",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_current_role_2",
+      "category": "current_role",
+      "statement": "Pendal appoints head of distribution - Financial Standard | | | | | | | | | | --- --- --- --- | | | | | | | --- --- | | Executive Appointments | | | | --- | | | | | | | | | --- | | | | | Sign up FS Industry Moves Pendal appoints head of distributionBY KARREN VERGARA | MONDAY, 27 AUG 2018 12:36PM Global investment manag",
+      "verification_status": "verified",
+      "confidence": "medium",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "role_fit",
+        "current_role",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_tenure_1",
+      "category": "tenure",
+      "statement": "Estimated at approximately 8.0 years based on dated public-web snippets; this should still be checked manually.",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "mobility_signal",
+        "current_role"
+      ],
+      "numeric_value": 8.0
+    },
+    {
+      "claim_id": "candidate_1_channel_1",
+      "category": "channel_experience",
+      "statement": "Anthony Serhan, CFA - Distribution Director at Perpetual Group Experience ; Distribution Director. Perpetual Group. Mar 2023 ; Distribution Director. Pendal Group. Oct 2018 ; Director. CFA Society of Sydney. Oct 2011 ; Director.",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_channel_2",
+      "category": "channel_experience",
+      "statement": "Pendal appoints head of distribution - Financial Standard | | | | | | | | | | --- --- --- --- | | | | | | | --- --- | | Executive Appointments | | | | --- | | | | | | | | | --- | | | | | Sign up FS Industry Moves Pendal appoints head of distributionBY KARREN VERGARA | MONDAY, 27 AUG 2018 12:36PM Global investment manag",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_experience_1",
+      "category": "experience",
+      "statement": "Anthony Serhan, CFA - Distribution Director at Perpetual Group Experience ; Distribution Director. Perpetual Group. Mar 2023 ; Distribution Director. Pendal Group. Oct 2018 ; Director. CFA Society of Sydney. Oct 2011 ; Director.",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_experience_2",
+      "category": "experience",
+      "statement": "Speaker Profiles - SPARK Institute Anthony joined Pendal Group in October 2018 and is a member of the Australian Executive team. Drawing upon his extensive experience in retail and institutional funds management Anthony is responsible for the strategic development of key relationships and is also a Director of Pendal F",
+      "verification_status": "strongly_inferred",
+      "confidence": "medium",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "experience_tags",
+        "role_fit",
+        "outreach_hook"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_firm_context_1",
+      "category": "firm_context",
+      "statement": "Pendal Group appears in public-web results as an established investment or wealth platform, but exact AUM still requires direct verification.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "firm_aum_context",
+        "career_narrative",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_mobility_1",
+      "category": "mobility",
+      "statement": "Recent public-web snippets should be reviewed manually to confirm whether the candidate is in an authentic transition window.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "mobility_signal",
+        "outreach_hook",
+        "career_narrative"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_verification_10",
+      "category": "verification_boundary",
+      "statement": "precise firm AUM remains uncertain and should be framed cautiously.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_verification_11",
+      "category": "verification_boundary",
+      "statement": "verified current-role start date is not yet verified from available public research.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_verification_12",
+      "category": "verification_boundary",
+      "statement": "verified reporting line / team size is not yet verified from available public research.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    },
+    {
+      "claim_id": "candidate_1_verification_13",
+      "category": "verification_boundary",
+      "statement": "direct evidence of channel revenue ownership is not yet verified from available public research.",
+      "verification_status": "uncertain",
+      "confidence": "low",
+      "source_labels": [
+        "Anthony Serhan, CFA - Distribution Director at Perpetual Group",
+        "Pendal appoints head of distribution - Financial Standard",
+        "Speaker Profiles - SPARK Institute",
+        "Team Members Archive | Pendal Group",
+        "Our People - Team Members Archive | Pendal Group",
+        "Pendal Group Ltd Company Profile - Overview - GlobalData",
+        "Pendal hires former Morningstar CEO - Investor Daily",
+        "Pendal Group Information - RocketReach"
+      ],
+      "supports_output_fields": [
+        "career_narrative",
+        "firm_aum_context",
+        "mobility_signal",
+        "role_fit"
+      ],
+      "numeric_value": null
+    }
+  ],
+  "verification": {
+    "missing_fields": [
+      "verified current-role start date",
+      "verified reporting line / team size",
+      "direct evidence of channel revenue ownership"
+    ],
+    "uncertain_fields": [
+      "precise firm AUM"
+    ],
+    "confidence_notes": [
+      "Live public-web research was attempted through Tavily for Anthony Serhan.",
+      "Only publicly available snippets were captured, so chronology and coverage scope may still require manual verification."
+    ]
+  },
+  "recruiter_signals": {
+    "channel_orientation": "mixed",
+    "mandate_similarity": "direct_match",
+    "key_sell_points": [
+      "current title already signals senior distribution ownership",
+      "public evidence supports mixed channel relevance"
+    ],
+    "key_gaps": [
+      "precise firm AUM remains unclear",
+      "verified current-role start date remains unclear"
+    ]
+  },
+  "generated_at": "2026-03-18T03:06:45.870872+00:00"
+}

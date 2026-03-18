@@ -100,8 +100,8 @@ def _build_candidate_payload(
                 "current_role": {"title": "Head of Distribution", "employer": f"Firm {idx}", "tenure_years": 2.0},
                 "career_narrative": (
                     f"Placeholder {idx} is currently Head of Distribution at Firm {idx}, with public evidence pointing to an institutional lane. "
-                    "This profile looks commercially relevant on an adjacent basis because public evidence supports institutional channel relevance. "
-                    "The main boundary for now is that team scale not verified."
+                    "For the target mandate, the relevance comes from institutional coverage already sitting close to the brief on seniority. "
+                    "What remains unclear from public evidence is team leadership scale behind the remit."
                 ),
                 "experience_tags": ["distribution"],
                 "firm_aum_context": f"Firm {idx} context requires verification.",
@@ -109,9 +109,9 @@ def _build_candidate_payload(
                 "role_fit": {
                     "role": "Head of Distribution / National BDM",
                     "score": 6,
-                    "justification": f"Head of Distribution at Firm {idx} keeps this candidate in frame because public evidence supports institutional channel relevance. The biggest commercial gap is that team scale not verified. The first screening question should be whether team scale matches the role scope.",
+                    "justification": f"This profile is in frame because Head of Distribution at Firm {idx} points to institutional coverage at senior level. Key unresolved point: team leadership scale behind the remit, which is not verified publicly. Screening priority: What size team has this role actually led?",
                 },
-                "outreach_hook": f"I'm reaching out because your Head of Distribution background at Firm {idx} appears relevant to a comparable institutional distribution remit within a Head of Distribution / National BDM search.",
+                "outreach_hook": f"We're working on a distribution leadership brief where your institutional coverage at Firm {idx} looks especially relevant.",
             }
         )
     return {"candidates": candidates}
@@ -411,7 +411,7 @@ def test_lookup_tool_auto_mode_falls_back_to_fixture_on_live_error(tmp_path) -> 
             {"likely_channel_evidence": ["Public snippets mention institutional and wholesale distribution coverage."]},
             "mixed",
         ),
-        ("Head of Distribution", {"likely_channel_evidence": ["Public snippets mention distribution leadership only."]}, "unclear"),
+        ("Head of Distribution", {"likely_channel_evidence": ["Public snippets mention distribution leadership only."]}, "mixed"),
     ],
 )
 def test_recruiter_signals_derives_channel_orientation(tmp_path, title: str, fixture: dict[str, Any], expected: str) -> None:
@@ -448,12 +448,98 @@ def test_recruiter_signals_sell_points_and_gaps_are_claim_and_verification_backe
 
     assert enrichment.recruiter_signals.key_sell_points
     assert len(enrichment.recruiter_signals.key_sell_points) <= 2
-    assert "public evidence supports institutional channel relevance" in enrichment.recruiter_signals.key_sell_points
+    assert "current remit is anchored in senior institutional coverage" in enrichment.recruiter_signals.key_sell_points
     assert len(enrichment.recruiter_signals.key_gaps) <= 2
-    assert enrichment.recruiter_signals.key_gaps[0] == "direct institutional coverage still needs confirmation"
-    assert "team scale not verified" in enrichment.recruiter_signals.key_gaps
+    assert enrichment.recruiter_signals.key_gaps[0] == "direct market institutional network depth is not verified publicly"
+    assert "team leadership scale behind the remit is not verified publicly" in enrichment.recruiter_signals.key_gaps
+    assert enrichment.recruiter_signals.scope_signal == "unclear"
+    assert enrichment.recruiter_signals.seniority_signal == "director_level"
+    assert enrichment.recruiter_signals.evidence_strength in {"moderate", "strong"}
+    assert enrichment.recruiter_signals.screening_priority_question == "How much direct market institutional network depth sits behind the current title?"
     research_package = enrichment.research_package()
     assert research_package["recruiter_signals"]["channel_orientation"] == "institutional"
+
+
+@pytest.mark.parametrize(
+    ("title", "fixture", "expected_scope", "expected_seniority"),
+    [
+        ("Head of Distribution Wealth Management Australia and New Zealand", {}, "anz", "head_level"),
+        ("Global Head of Institutional Distribution", {}, "global", "head_level"),
+        ("Regional Director, Wholesale Distribution APAC", {}, "regional", "director_level"),
+        ("National BDM Wholesale", {}, "national", "bdm_level"),
+    ],
+)
+def test_recruiter_signals_derives_scope_and_seniority(tmp_path, title: str, fixture: dict[str, Any], expected_scope: str, expected_seniority: str) -> None:
+    enrichment = _build_enrichment(tmp_path, title=title, fixture=fixture)
+    assert enrichment.recruiter_signals.scope_signal == expected_scope
+    assert enrichment.recruiter_signals.seniority_signal == expected_seniority
+
+
+def test_recruiter_signals_prioritize_commercial_gaps_over_low_value_admin_gaps(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        title="Head of Distribution",
+        fixture={
+            "uncertain_fields": ["exact current-role start date", "direct Australian institutional coverage", "exact firm AUM"],
+            "missing_fields": ["verified reporting line / team size"],
+        },
+    )
+
+    assert len(enrichment.recruiter_signals.key_gaps) <= 2
+    assert any("network depth" in gap for gap in enrichment.recruiter_signals.key_gaps)
+    assert any("team leadership scale" in gap for gap in enrichment.recruiter_signals.key_gaps)
+    assert all("aum" not in gap.lower() for gap in enrichment.recruiter_signals.key_gaps)
+
+
+def test_stabilized_output_differentiates_lane_scope_and_hook_across_candidates(tmp_path) -> None:
+    institutional = _build_enrichment(
+        tmp_path,
+        full_name="Institutional Candidate",
+        employer="Institutional AM",
+        title="Director, Institutional Sales",
+        fixture={"likely_channel_evidence": ["Public snippets reference institutional distribution coverage."]},
+    )
+    wealth = _build_enrichment(
+        tmp_path,
+        full_name="Wealth Candidate",
+        employer="Wealth AM",
+        title="Head of Distribution Wealth Management Australia and New Zealand",
+        fixture={"likely_channel_evidence": ["Public snippets reference wealth distribution and adviser coverage."]},
+    )
+    wholesale = _build_enrichment(
+        tmp_path,
+        full_name="Wholesale Candidate",
+        employer="Wholesale AM",
+        title="Senior BDM Wholesale",
+        fixture={"likely_channel_evidence": ["Public snippets reference wholesale and IFA distribution coverage."]},
+    )
+
+    base_payload = {
+        "candidate_id": "candidate_1",
+        "full_name": "Placeholder",
+        "current_role": {"title": "Placeholder", "employer": "Placeholder", "tenure_years": 2.0},
+        "career_narrative": "Placeholder one. Placeholder two. Placeholder three.",
+        "experience_tags": ["distribution"],
+        "firm_aum_context": "Placeholder context.",
+        "mobility_signal": {"score": 3, "rationale": "Public chronology remains limited. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation."},
+        "role_fit": {"role": "Head of Distribution / National BDM", "score": 7, "justification": "Placeholder one. Placeholder two. Placeholder three."},
+        "outreach_hook": "Placeholder hook.",
+    }
+
+    institutional_brief = _stabilize_candidate_brief(candidate_brief=validate_and_repair_candidate_payload(base_payload, candidate_id="candidate_1", full_name="Institutional Candidate"), enrichment=institutional)
+    wealth_brief = _stabilize_candidate_brief(candidate_brief=validate_and_repair_candidate_payload(base_payload, candidate_id="candidate_2", full_name="Wealth Candidate"), enrichment=wealth)
+    wholesale_brief = _stabilize_candidate_brief(candidate_brief=validate_and_repair_candidate_payload(base_payload, candidate_id="candidate_3", full_name="Wholesale Candidate"), enrichment=wholesale)
+
+    assert "institutional lane" in institutional_brief.career_narrative.lower()
+    assert "wealth lane" in wealth_brief.career_narrative.lower()
+    assert "wholesale lane" in wholesale_brief.career_narrative.lower()
+    assert "anz scope" in wealth_brief.career_narrative.lower()
+    assert institutional_brief.role_fit.justification != wholesale_brief.role_fit.justification
+    assert wealth_brief.outreach_hook != wholesale_brief.outreach_hook
+    assert "institutional" in institutional_brief.outreach_hook.lower()
+    assert "broader channel stretch" in institutional_brief.outreach_hook.lower()
+    assert "wealth and intermediary distribution leadership" in wealth_brief.outreach_hook.lower()
+    assert "step-up conversation" in wholesale_brief.outreach_hook.lower()
 
 
 def test_recruiter_usefulness_qa_accepts_lane_relevance_boundary_structure(tmp_path) -> None:
@@ -472,15 +558,15 @@ def test_recruiter_usefulness_qa_accepts_lane_relevance_boundary_structure(tmp_p
             enrichment,
             career_narrative=(
                 "Example Candidate is currently Director, Institutional Sales at Example AM, with public evidence pointing to an institutional lane. "
-                "This profile looks commercially relevant on an adjacent basis for the mandate because public evidence supports institutional channel relevance. "
-                "The main boundary for now is that direct institutional coverage still needs confirmation."
+                "For the target mandate, the relevance comes from institutional coverage already sitting close to the brief on channel mix and seniority. "
+                "What remains unclear from public evidence is how much direct Australian institutional coverage sits behind the remit."
             ),
             role_fit_justification=(
-                "This candidate is in frame because public evidence supports institutional channel relevance. "
-                "The biggest commercial gap is that team scale not verified. "
-                "The first screening question should be whether team scale matches the role scope."
+                "This profile is in frame because the current remit already points to institutional coverage at director level. "
+                "Key unresolved point: team leadership scale behind the remit, which is not verified publicly. "
+                "Screening priority: What size team has this role actually led?"
             ),
-            outreach_hook="I'm reaching out because your background appears relevant to a comparable institutional distribution remit within a Head of Distribution / National BDM search.",
+            outreach_hook="We're working on a distribution leadership brief where your institutional and super-fund coverage at Example AM looks especially relevant.",
         )
     )
 
@@ -591,8 +677,19 @@ def test_firm_aum_context_explicitly_surfaces_unverifiable_context(tmp_path) -> 
         )
     )
     candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
-    assert "unable to verify exact aum from public sources" in candidate.firm_aum_context.lower()
-    assert "based on firm type and sector context" in candidate.firm_aum_context.lower()
+    assert any(
+        marker in candidate.firm_aum_context.lower()
+        for marker in (
+            "unable to verify",
+            "public filings do not confirm",
+            "public aum remains unverified",
+            "exact aum is unavailable",
+        )
+    )
+    assert (
+        "firm type and sector context" in candidate.firm_aum_context.lower()
+        or "firm profile indicates" in candidate.firm_aum_context.lower()
+    )
     assert "$" not in candidate.firm_aum_context
 
 
@@ -829,7 +926,15 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
 
     assert output_path.exists()
     assert len(list(intermediate_dir.glob("*_enriched.json"))) == 5
-    assert "unable to verify exact aum from public sources" in result.candidates[0].firm_aum_context.lower()
+    assert any(
+        marker in result.candidates[0].firm_aum_context.lower()
+        for marker in (
+            "unable to verify",
+            "public filings do not confirm",
+            "public aum remains unverified",
+            "exact aum is unavailable",
+        )
+    )
 
 
 def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monkeypatch) -> None:

@@ -1,71 +1,57 @@
 {
   "tool_name": "candidate_public_profile_lookup",
-  "tool_mode": "fixture_backed",
+  "tool_mode": "live_web",
   "candidate_id": "candidate_2",
-  "full_name": "B",
-  "current_employer": "Two",
-  "current_title": "Title",
+  "full_name": "Cathy Hales",
+  "current_employer": "Perpetual Limited",
+  "current_title": "Head of Retail Sales",
   "verified_public_snippets": [
-    "Provided task input lists B as Title at Two.",
-    "LinkedIn URL in the PPP brief is a placeholder, so live public-profile verification is still pending."
+    "Cathy Hales - Business News Non-Executive Director / Navigator Global Investments Cathy Hales has over 25 years of experience in leading and developing investment management businesses in Sydney, London, New York and Tokyo. She also has experience in building business partnerships as an executive leader and non-executi"
   ],
   "inferred_tenure_years": null,
-  "tenure_rationale": "Exact current-role tenure could not be verified from the controlled fixture and remains a key follow-up item.",
+  "tenure_rationale": "Exact current-role tenure could not be verified from public-web snippets and remains a manual follow-up item.",
   "likely_channel_evidence": [
-    "The title 'Title' suggests senior distribution channel responsibility."
+    "The title 'Head of Retail Sales' suggests client-channel responsibility, but public-web confirmation remains limited."
   ],
   "likely_experience_evidence": [
-    "Current employer/title pairing suggests relevance to funds-management client coverage at Two."
+    "Public-web search found directional evidence tied to Perpetual Limited, but exact remit details still need manual confirmation."
   ],
-  "firm_aum_context": "Two appears to be a established market participant funds-management firm; exact AUM requires live public verification; distribution exposure inferred from the candidate's title.",
+  "firm_aum_context": "Perpetual Limited appears in public-web results as an established investment or wealth platform, but exact AUM still requires direct verification.",
   "firm_context_clues": [],
   "mobility_evidence": [
-    "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified."
+    "Recent public-web snippets should be reviewed manually to confirm whether the candidate is in an authentic transition window."
   ],
   "missing_fields": [
-    "exact current-role start date",
+    "verified current-role start date",
     "verified reporting line / team size",
-    "direct evidence of platform, IFA, and superannuation coverage"
+    "direct evidence of channel revenue ownership"
   ],
   "uncertain_fields": [
-    "precise tenure estimate",
-    "channel mix breadth",
-    "current mobility intent"
+    "precise current-role tenure",
+    "precise firm AUM",
+    "team leadership scope"
   ],
   "confidence_notes": [
-    "This enrichment run is fixture-backed and should be upgraded with live public-web verification before final submission."
+    "Live public-web research was attempted through Tavily for Cathy Hales.",
+    "Only publicly available snippets were captured, so chronology and coverage scope may still require manual verification."
   ],
   "sources": [
     {
-      "label": "PPP task input CSV",
-      "source_type": "provided_input",
-      "url": null,
-      "confidence": "high"
-    },
-    {
-      "label": "Task brief LinkedIn placeholder",
-      "source_type": "linkedin_placeholder",
-      "url": "https://example.com/2",
+      "label": "Cathy Hales - Business News",
+      "source_type": "public_web",
+      "url": "https://www.businessnews.com.au/Person/Cathy-Hales",
       "confidence": "low"
     }
   ],
   "evidence": [
     {
       "category": "current_role",
-      "signal": "provided_input",
-      "snippet": "Provided task input lists B as Title at Two.",
+      "signal": "public_web_search",
+      "snippet": "Cathy Hales - Business News Non-Executive Director / Navigator Global Investments Cathy Hales has over 25 years of experience in leading and developing investment management businesses in Sydney, London, New York and Tokyo. She also has experience in building business partnerships as an executive leader and non-executi",
       "source_labels": [
-        "PPP task input CSV"
-      ]
-    },
-    {
-      "category": "mobility",
-      "signal": "uncertain",
-      "snippet": "Mobility should be inferred cautiously until live tenure chronology and recent promotions are verified.",
-      "source_labels": [
-        "Task brief LinkedIn placeholder"
+        "Cathy Hales - Business News"
       ]
     }
   ],
-  "generated_at": "2026-03-17T10:53:16.539357+00:00"
+  "generated_at": "2026-03-17T12:45:50.282571+00:00"
 }

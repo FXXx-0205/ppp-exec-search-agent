@@ -28,6 +28,9 @@ QUALIFIER_TERMS = (
     "should be verified",
     "boundary",
     "public evidence does not confirm",
+    "public filings do not confirm",
+    "public aum remains unverified",
+    "exact aum is unavailable",
     "treated here as",
     "pending conversation",
     "should be confirmed in conversation",
@@ -62,6 +65,25 @@ ROLE_FIT_FORBIDDEN_TERMS = (
     "demonstrated capability",
     "established profile",
 )
+BAD_PHRASE_TERMS = (
+    "a established",
+    "distribution distribution",
+    "credible angle",
+    "adjacent transferability",
+    "what stood out was",
+    "anchored in",
+    "adjacent option",
+    "appears relevant",
+    "appears relevant to a comparable remit",
+    "should be handled as strong evidence until tested",
+    "public evidence supports relevance",
+    "keeps this profile in frame as a",
+    "currently sitting in",
+    "from a recruiter lens, the relevance comes from",
+    "that puts the profile close to the",
+    "the main commercial gap is",
+    "the first screening question is",
+)
 STOPWORDS = {
     "about",
     "across",
@@ -95,12 +117,21 @@ STOPWORDS = {
     "verification",
 }
 LANE_TERMS = ("institutional", "wholesale", "wealth", "retail", "ifa", "platform", "distribution")
-SCREENING_ANGLE_TERMS = ("first screening question", "key point to test", "test in conversation", "screening question", "screening conversation")
+SCOPE_TERMS = ("national", "anz", "global", "regional", "australia", "new zealand", "apac")
+SCREENING_ANGLE_TERMS = (
+    "first screening question",
+    "key point to test",
+    "test in conversation",
+    "screening question",
+    "screening conversation",
+    "screening priority",
+)
 GENERIC_INVITATION_TERMS = (
     "welcome a conversation",
     "caught our attention",
     "worth discussing",
     "worth a conversation",
+    "your background appears relevant",
 )
 COMMERCIAL_ANGLE_TERMS = (
     "institutional",
@@ -119,7 +150,13 @@ COMMERCIAL_ANGLE_TERMS = (
     "coverage brief",
     "coverage",
     "remit",
+    "leadership",
+    "anz",
+    "national",
 )
+COMMERCIAL_RELEVANCE_TERMS = ("direct match", "adjacent", "step-up", "commercially", "mandate", "in frame", "relevance")
+LOW_VALUE_GAP_TERMS = ("aum", "start date", "tenure")
+HIGH_VALUE_GAP_TERMS = ("network depth", "team", "platform", "ifa", "super", "institutional coverage", "product breadth", "market profile", "channel")
 
 
 class QAFinding(BaseModel):
@@ -145,6 +182,7 @@ def run_bundle_qa(
         input_candidate = candidates.get(candidate.candidate_id)
         enrichment = enrichments.get(candidate.candidate_id)
         findings.extend(_check_candidate(candidate, input_candidate, enrichment))
+    findings.extend(_check_bundle_differentiation(output=output, enrichments=enrichments))
     return QAReport(passed=not any(item.severity == "error" for item in findings), findings=findings)
 
 
@@ -249,6 +287,9 @@ def _check_candidate(
             findings.append(
                 _error(candidate.candidate_id, "role_fit_forbidden_phrase", f"role_fit.justification contains forbidden phrasing: '{term}'.")
             )
+    for term in BAD_PHRASE_TERMS:
+        if term in combined:
+            findings.append(_error(candidate.candidate_id, "bad_phrase_suppression", f"Output contains banned phrasing: '{term}'."))
 
     findings.extend(_check_recruiter_usefulness(candidate, enrichment))
     findings.extend(_check_uncertainty_expression(candidate, enrichment))
@@ -392,6 +433,8 @@ def _unsupported_output_fields(candidate: CandidateBrief, enrichment: CandidateE
     for field_name, text in checks.items():
         support = enrichment.field_support(field_name)
         claims = enrichment.claims_for_output_field(field_name)
+        if field_name == "role_fit" and _role_fit_grounded_in_claims_or_signals(text, enrichment):
+            continue
         if support.supported_by_claim_ids and _field_exceeds_claim_boundary(text, claims, field_name=field_name):
             unsupported.append(field_name)
     return unsupported
@@ -531,6 +574,14 @@ def _check_recruiter_usefulness(
                 "career_narrative cannot stop at title summary plus generic caution; it should also explain lane relevance.",
             )
         )
+    if not _contains_commercial_relevance_signal(candidate.career_narrative, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "career_narrative_commercial_relevance",
+                "career_narrative must include at least one commercial relevance signal tied to lane, scope, or fit type.",
+            )
+        )
 
     role_fit_text = candidate.role_fit.justification.lower()
     if not _contains_supported_strength(candidate.role_fit.justification, enrichment):
@@ -555,6 +606,22 @@ def _check_recruiter_usefulness(
                 candidate.candidate_id,
                 "role_fit_screening_angle",
                 "role_fit.justification must include an explicit screening angle or what-to-test sentence.",
+            )
+        )
+    if not _contains_lane_or_scope_signal(candidate.role_fit.justification, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "role_fit_lane_or_scope_signal",
+                "role_fit.justification must reference at least one lane, scope, or market-specific signal.",
+            )
+        )
+    if enrichment is not None and _has_only_low_value_gaps(enrichment.recruiter_signals.key_gaps):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "low_value_gap_suppression",
+                "recruiter_signals.key_gaps cannot collapse to only exact AUM or date-style admin gaps when stronger commercial gaps are available.",
             )
         )
 
@@ -649,6 +716,8 @@ def _contains_supported_strength(text: str, enrichment: CandidateEnrichmentResul
         sell_points = [point.lower() for point in enrichment.recruiter_signals.key_sell_points]
         if any(point in lowered for point in sell_points):
             return True
+        if enrichment.current_employer.lower() in lowered and any(term in lowered for term in ("remit", "relevance", "in frame", "distribution")):
+            return True
         return _text_grounded_in_claims(text, enrichment.claims_for_output_field("role_fit"), field_name="role_fit")
     return any(term in lowered for term in ("title", "employer", "distribution", "institutional", "wholesale", "wealth", "retail"))
 
@@ -661,10 +730,16 @@ def _contains_concrete_gap(text: str, enrichment: CandidateEnrichmentResult | No
             return True
     concrete_gap_terms = (
         "team scale",
+        "team leadership scale",
         "reporting line",
         "channel breadth",
         "network depth",
         "coverage depth",
+        "market profile",
+        "product breadth",
+        "super fund",
+        "platform",
+        "ifa",
         "not verified",
         "remains unclear",
         "needs confirmation",
@@ -683,6 +758,8 @@ def _contains_specific_commercial_angle(text: str, enrichment: CandidateEnrichme
         return True
     if signals.mandate_similarity.replace("_", " ") in lowered:
         return True
+    if signals.scope_signal != "unclear" and signals.scope_signal in lowered:
+        return True
     return any(point.lower() in lowered for point in signals.key_sell_points)
 
 
@@ -699,9 +776,13 @@ def _firm_aum_context_handles_uncertainty(text: str, enrichment: CandidateEnrich
     required_markers = (
         "unable to verify",
         "public evidence does not confirm",
+        "public filings do not confirm",
+        "public aum remains unverified",
+        "exact aum is unavailable",
         "estimated",
         "treated here as",
         "based on firm type and sector context",
+        "firm profile indicates",
     )
     return any(marker in lowered for marker in required_markers)
 
@@ -716,3 +797,156 @@ def _mobility_has_uncertainty_structure(text: str) -> bool:
         and any(marker in lowered for marker in uncertainty_markers)
         and any(marker in lowered for marker in follow_up_markers)
     )
+
+
+def _role_fit_grounded_in_claims_or_signals(text: str, enrichment: CandidateEnrichmentResult) -> bool:
+    lowered = text.lower()
+    signals = enrichment.recruiter_signals
+    supported_phrases = [
+        *[point.lower() for point in signals.key_sell_points],
+        *[gap.lower() for gap in signals.key_gaps],
+        signals.screening_priority_question.lower(),
+        signals.channel_orientation.lower(),
+        signals.scope_signal.lower(),
+        enrichment.current_employer.lower(),
+        enrichment.current_title.lower(),
+    ]
+    if any(phrase and phrase in lowered for phrase in supported_phrases if phrase != "unclear"):
+        return True
+    return _text_grounded_in_claims(text, enrichment.claims_for_output_field("role_fit"), field_name="role_fit")
+
+
+def _contains_commercial_relevance_signal(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
+    lowered = text.lower()
+    if any(term in lowered for term in COMMERCIAL_RELEVANCE_TERMS):
+        return True
+    if enrichment is None:
+        return False
+    if enrichment.recruiter_signals.mandate_similarity.replace("_", " ") in lowered:
+        return True
+    if any(point.lower() in lowered for point in enrichment.recruiter_signals.key_sell_points):
+        return True
+    return _contains_lane_or_scope_signal(text, enrichment)
+
+
+def _contains_lane_or_scope_signal(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
+    lowered = text.lower()
+    if any(term in lowered for term in LANE_TERMS + SCOPE_TERMS):
+        return True
+    if enrichment is None:
+        return False
+    signals = enrichment.recruiter_signals
+    if signals.channel_orientation != "unclear" and signals.channel_orientation in lowered:
+        return True
+    if signals.scope_signal != "unclear" and signals.scope_signal in lowered:
+        return True
+    return False
+
+
+def _has_only_low_value_gaps(gaps: list[str]) -> bool:
+    cleaned = [gap.lower() for gap in gaps if gap.strip()]
+    if not cleaned:
+        return False
+    has_high_value = any(any(term in gap for term in HIGH_VALUE_GAP_TERMS) for gap in cleaned)
+    if has_high_value:
+        return False
+    return all(any(term in gap for term in LOW_VALUE_GAP_TERMS) for gap in cleaned)
+
+
+def _check_bundle_differentiation(
+    *,
+    output: PPPOutput,
+    enrichments: dict[str, CandidateEnrichmentResult],
+) -> list[QAFinding]:
+    findings: list[QAFinding] = []
+    for field_name in ("career_narrative", "role_fit.justification", "outreach_hook"):
+        masked_seen: dict[str, tuple[str, str]] = {}
+        for candidate in output.candidates:
+            enrichment = enrichments.get(candidate.candidate_id)
+            masked = _mask_candidate_specific_terms(_extract_field(candidate, field_name), enrichment)
+            normalized = re.sub(r"\s+", " ", masked.strip().lower())
+            signal_fingerprint = _signal_fingerprint(enrichment)
+            if normalized in masked_seen and masked_seen[normalized][1] != signal_fingerprint:
+                findings.append(
+                    _error(
+                        candidate.candidate_id,
+                        f"{field_name}_template_similarity",
+                        f"{field_name} is still too similar to {masked_seen[normalized][0]} once candidate-specific names and employers are removed.",
+                    )
+                )
+            else:
+                masked_seen[normalized] = (candidate.candidate_id, signal_fingerprint)
+
+    question_counts: dict[str, list[tuple[str, str]]] = {}
+    gap_counts: dict[str, list[tuple[str, str]]] = {}
+    for candidate_id, enrichment in enrichments.items():
+        question = re.sub(r"\s+", " ", enrichment.recruiter_signals.screening_priority_question.strip().lower())
+        fingerprint = _signal_fingerprint(enrichment)
+        question_counts.setdefault(question, []).append((candidate_id, fingerprint))
+        for gap in enrichment.recruiter_signals.key_gaps:
+            normalized_gap = re.sub(r"\s+", " ", gap.strip().lower())
+            gap_counts.setdefault(normalized_gap, []).append((candidate_id, fingerprint))
+
+    for question, candidate_entries in question_counts.items():
+        if len(candidate_entries) >= 3 and len({fingerprint for _, fingerprint in candidate_entries}) >= 2:
+            findings.append(
+                _error(
+                    None,
+                    "screening_question_template_similarity",
+                    f"screening_priority_question is repeating across too many candidates: '{question}'.",
+                )
+            )
+    for gap, candidate_entries in gap_counts.items():
+        if len(candidate_entries) >= 3 and len({fingerprint for _, fingerprint in candidate_entries}) >= 2 and (
+            "multi-channel" in gap or "aum" in gap or "start date" in gap or "mobility" in gap
+        ):
+            findings.append(
+                _error(
+                    None,
+                    "key_gap_template_similarity",
+                    f"key_gaps are repeating as a low-value template across too many candidates: '{gap}'.",
+                )
+            )
+    return findings
+
+
+def _mask_candidate_specific_terms(text: str, enrichment: CandidateEnrichmentResult | None) -> str:
+    masked = text
+    if enrichment is None:
+        return masked
+    replacements = [
+        enrichment.full_name,
+        enrichment.current_employer,
+        enrichment.current_title,
+        "Head of Distribution / National BDM",
+    ]
+    for value in replacements:
+        if value:
+            masked = re.sub(re.escape(value), "<masked>", masked, flags=re.IGNORECASE)
+    return masked
+
+
+def _signal_fingerprint(enrichment: CandidateEnrichmentResult | None) -> str:
+    if enrichment is None:
+        return "no-enrichment"
+    signals = enrichment.recruiter_signals
+    return "|".join(
+        [
+            signals.channel_orientation,
+            signals.scope_signal,
+            signals.mandate_similarity,
+            signals.seniority_signal,
+            ",".join(signals.key_gaps),
+            signals.screening_priority_question,
+        ]
+    )
+
+
+def _extract_field(candidate: CandidateBrief, field_name: str) -> str:
+    if field_name == "career_narrative":
+        return candidate.career_narrative
+    if field_name == "role_fit.justification":
+        return candidate.role_fit.justification
+    if field_name == "outreach_hook":
+        return candidate.outreach_hook
+    raise ValueError(f"Unsupported field differentiation check: {field_name}")

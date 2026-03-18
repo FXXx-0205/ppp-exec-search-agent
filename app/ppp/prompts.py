@@ -8,7 +8,8 @@ from app.ppp.models import ROLE_NAME, CandidateCSVRow
 
 def build_generation_system_prompt() -> str:
     return (
-        "You are an executive-search research analyst writing candidate briefings for a specialist search firm. "
+        "You are a senior executive recruiter writing shortlist notes for a specialist search firm. "
+        "Write with a crisp, direct, commercially grounded tone. Sound like a senior recruiter, not an analyst explaining reasoning. "
         "Return only valid JSON for one candidate. Never use markdown fences. Never invent facts beyond the supplied "
         "structured research package. Treat claims marked verified as hard evidence, claims marked strongly_inferred "
         "as directional but still bounded evidence, and claims marked uncertain as follow-up items that require cautious wording. "
@@ -17,14 +18,19 @@ def build_generation_system_prompt() -> str:
         "uncertainty explicitly. If a detail cannot be supported safely, use minimal recruiter-usable wording rather than inventing "
         "specificity. If a data point cannot be directly verified from public evidence, you must say so explicitly. You may provide a cautious contextual estimate, "
         "but you must not present inferred information as confirmed fact. A useful recruiter-facing brief makes uncertainty visible rather than hiding it behind confident language. "
-        "Write like a search consultant: specific, concise, commercially useful, and candidate-specific. "
+        "Write like a search consultant: specific, concise, commercially useful, and candidate-specific. State conclusions directly rather than narrating your thought process. "
         "Avoid generic recruiter-template language such as 'directionally aligned', 'highly relevant to a current search mandate', "
         "'strong directional fit', 'directional fit', or 'looks relevant to a leadership search we are currently running'. "
+        "Avoid stiff phrasing such as 'credible angle', 'adjacent transferability', 'appears relevant to a comparable remit', "
+        "'keeps this profile in frame', 'public evidence supports relevance', or 'should be handled as strong evidence until tested'. "
+        "Do not use these phrases: 'Currently sitting in a [X] lane', 'From a recruiter lens, the relevance comes from', "
+        "'That puts the profile close to the', 'The main commercial gap is', or 'The first screening question is'. "
         "career_narrative must be exactly 3 sentences, experience_tags must come from supported claims, "
         "mobility_signal must be grounded in tenure/trajectory claims and written in a cautious two-sentence structure, "
         "role_fit.justification must explain both strengths and limits in exactly three sentences, "
         "and outreach_hook must be exactly one sentence with a specific commercial reason-for-call. recruiter_signals are provided only to organize "
-        "recruiter-useful writing; they are not a new source of facts and must remain inside the same claims/confidence boundary. Treat the task as constrained slot filling plus polished language, "
+        "recruiter-useful writing; they are recruiter-oriented interpretations of the existing claims, not a new source of facts, and they must remain inside the same claims/confidence boundary. "
+        "Use recruiter_signals to sharpen lane, scope, fit type, commercial reason-to-call, and commercial gap, but never to introduce facts not already supported in claims or verification. Treat the task as constrained slot filling plus polished language, "
         "not open-ended generation."
     )
 
@@ -48,11 +54,13 @@ def build_generation_user_prompt(
             "uncertain_claims": "Must be framed with caution or verification language rather than presented as settled fact.",
             "recruiter_signals_usage": [
                 "recruiter_signals help organize recruiter-useful wording only",
-                "do not treat recruiter_signals as independent facts beyond the supplied claims and verification summary",
+                "recruiter_signals are not independent facts beyond the supplied claims and verification summary",
                 "all sell points and gaps must stay inside the claim/confidence boundary",
                 "if mandate_similarity is adjacent_match or step_up_candidate, do not rewrite it as direct fit or proven fit",
+                "use lane, scope, seniority, evidence strength, and screening question to make the writing recruiter-usable without adding new facts",
                 "if a data point cannot be directly verified, say that explicitly rather than smoothing it into recruiter confidence",
                 "contextual estimates are allowed only when they are clearly marked as estimated, broad, or treated here as",
+                "state the commercial conclusion directly rather than narrating how you reached it",
             ],
         },
         "failure_policy": {
@@ -72,12 +80,17 @@ def build_generation_user_prompt(
         "writing_standards": {
             "career_narrative": [
                 "exactly 3 sentences",
-                "sentence 1: current lane using title + employer + recruiter_signals.channel_orientation",
+                "sentence 1: current lane + scope using title + employer + recruiter_signals.channel_orientation + recruiter_signals.scope_signal + recruiter_signals.seniority_signal",
                 "sentence 2: commercial relevance using recruiter_signals.mandate_similarity plus recruiter_signals.key_sell_points",
-                "sentence 3: explicit verification boundary using recruiter_signals.key_gaps",
+                "sentence 3: explicit verification boundary using recruiter_signals.key_gaps and recruiter_signals.evidence_strength",
+                "must answer which lane the candidate sits in, why that matters commercially, and what business boundary still needs testing",
+                "vary the phrasing across candidates; do not reuse the same sentence skeleton every time",
+                "bounded directional language such as leans toward, weighted toward, or broad distribution remit is allowed when it stays inside the claim boundary",
+                "do not write your reasoning process; give the conclusion directly",
                 "avoid generic template phrases",
                 "do not use achievement framing unless directly stated in a supported claim",
                 "do not use built, established track record, led transformation, scaled the function, positioned as, or drove growth unless a claim directly supports that wording",
+                "do not use 'Currently sitting in a [X] lane', 'From a recruiter lens, the relevance comes from', or 'That puts the profile close to the'",
             ],
             "experience_tags": [
                 "use claim-backed tags only",
@@ -85,10 +98,11 @@ def build_generation_user_prompt(
             ],
             "firm_aum_context": [
                 "describe firm type and AUM context",
-                "if exact AUM is not supported by a verified claim, explicitly say unable to verify from public sources or public evidence does not confirm exact AUM",
+                "if exact AUM is not supported by a verified claim, state the uncertainty clearly but vary the phrasing naturally",
                 "if exact AUM is not verified, you may give only a cautious qualitative estimate based on firm type and sector context",
                 "if allowed_facts marks firm_aum_context as qualitative_only, do not use numbers",
                 "do not invent a specific AUM number when direct verification is absent",
+                "do not always start with 'Unable to verify exact AUM from public sources'",
             ],
             "mobility_signal": [
                 "score 1 to 5",
@@ -96,6 +110,7 @@ def build_generation_user_prompt(
                 "write exactly 2 sentences",
                 "sentence 1: observable timing or chronology only",
                 "sentence 2: direct mobility evidence absent + explicit uncertainty + need for follow-up",
+                "if tenure_years is -1.0, sentence 1 must say: 'Tenure mapped to placeholder (-1.0) as public chronology is unavailable.'",
                 "do not infer motivation, commitment horizon, or active-search intent unless explicitly supported by the research package",
                 "when evidence is thin, prefer neutral wording such as uncertain, difficult to assess, or requires follow-up",
                 "do not use settled, ready to move, open to move, low near-term mobility, likely to leave, or natural transition point unless directly evidenced",
@@ -104,24 +119,35 @@ def build_generation_user_prompt(
                 f"role must be {ROLE_NAME}",
                 "score 1 to 10",
                 "write exactly 3 sentences",
-                "sentence 1: why the candidate is in frame using recruiter_signals.mandate_similarity plus recruiter_signals.key_sell_points",
+                "sentence 1: why the candidate is in frame using recruiter_signals.mandate_similarity plus recruiter_signals.channel_orientation, recruiter_signals.seniority_signal, and recruiter_signals.key_sell_points",
                 "sentence 2: biggest commercial gap using recruiter_signals.key_gaps with explicit unverified wording",
-                "sentence 3: explicit screening angle such as 'The first screening question should be...' or 'The key point to test in conversation is...'",
+                "sentence 3: explicit screening angle using recruiter_signals.screening_priority_question",
+                "must answer why in frame, the main commercial gap, and the first thing to test on the phone",
                 "justify fit against the provided role spec with both strengths and gaps",
                 "avoid generic template phrases and make the reasoning candidate-specific",
+                "write like a shortlist note rather than a system label",
+                "do not narrate the logic; state the commercial judgment directly",
+                "prefer direct constructions such as 'Strong alignment on X, but Y remains unverified. Screening priority: Z.'",
                 "do not state a capability as proven unless a supported claim directly anchors it",
                 "when in doubt, describe the gap or need for verification instead of upgrading the candidate's strength",
                 "do not use phrases like directionally aligned, directional fit, or strong directional fit",
                 "allowed language includes suggests, appears relevant, likely exposure, and public evidence supports",
                 "do not use strong fit, proven, deep network, fully de-risked, or well beyond the role unless directly supported",
+                "do not use rigid labels like direct match candidate or adjacent match candidate as standalone phrasing",
+                "prefer recruiter-relevant commercial gaps such as network depth, team scale, super/platform/IFA/institutional coverage, product breadth, or market profile over low-value admin gaps",
+                "do not use 'The main commercial gap is' or 'The first screening question is'",
             ],
             "outreach_hook": [
                 "exactly 1 sentence",
-                "sound like a consultant, not marketing copy",
+                "sound like a real LinkedIn InMail opener from a recruiter",
                 "must be candidate-specific",
                 "avoid generic search-template wording",
-                "must include a specific commercial angle such as institutional build-out, wholesale expansion, leadership step-up, comparable distribution remit, or adjacent but relevant lane",
+                "must include a specific commercial angle such as institutional build-out, wholesale expansion, ANZ wealth channel leadership, national distribution leadership, or adjacent but relevant lane transferability",
                 "must be based on recruiter_signals rather than a generic invitation",
+                "keep it conversational and natural, in one short sentence",
+                "do not simply repeat title + employer or stack multiple specialist labels",
+                "it may open with 'Hi [Name], ...' and may close with 'Worth a brief chat?'",
+                "do not use what stood out was, credible angle, appears relevant, or adjacent transferability",
             ],
         },
         "schema_rules": {
@@ -185,14 +211,16 @@ def build_generation_user_prompt(
                 ],
             },
             "firm_aum_context": {
-                "good_example": "Unable to verify exact AUM from public sources; based on firm type and sector context, the platform appears broadly comparable to a mid-tier active manager.",
+                "good_example": "Exact AUM remains unverified publicly. Firm profile indicates an established active-management platform rather than a start-up.",
                 "avoid": [
                     "invented AUM numbers without direct support",
                     "exact AUM stated as fact when public evidence does not confirm it",
+                    "repeating the same uncertainty opener every time",
+                    "a established",
                 ],
             },
             "role_fit": {
-                "good_example": "Public evidence supports relevance on current title and distribution remit. However, direct evidence of team scale and channel breadth remains unverified. This should be tested early in screening conversation.",
+                "good_example": "Good alignment on lane and remit. Direct evidence of team scale and channel breadth remains unverified. Screening priority: how much team leadership and channel depth sit behind the title?",
                 "avoid": [
                     "demonstrated team leadership unless explicitly supported",
                     "deep Australian market networks unless explicitly supported",
@@ -200,10 +228,14 @@ def build_generation_user_prompt(
                     "strong fit",
                     "well beyond the role",
                     "established profile",
+                    "keeps this profile in frame as a",
+                    "public evidence supports a recruiter-relevant remit",
+                    "the main commercial gap is",
+                    "the first screening question is",
                 ],
             },
             "career_narrative": {
-                "good_example": "The candidate is currently in an institutional lane at the named employer. That looks commercially relevant to the brief because public evidence supports institutional channel relevance. Public evidence does not fully confirm broader channel depth, and this should be confirmed in conversation.",
+                "good_example": "Holds an institutional distribution remit at the named employer with visible ANZ scope. The profile is commercially relevant because the lane is close to the mandate. Broader team scale and network depth remain unverified and should be tested early.",
                 "avoid": [
                     "built the function",
                     "transformed",
@@ -212,6 +244,11 @@ def build_generation_user_prompt(
                     "positioned as",
                     "scaled the function",
                     "drove growth",
+                    "this profile looks like",
+                    "should be handled as strong evidence until tested",
+                    "currently sitting in a",
+                    "from a recruiter lens, the relevance comes from",
+                    "that puts the profile close to the",
                 ],
             },
             "outreach_hook": {
@@ -220,6 +257,10 @@ def build_generation_user_prompt(
                     "caught our attention",
                     "worth discussing",
                     "current search mandate",
+                    "your background appears relevant",
+                    "credible angle",
+                    "adjacent transferability",
+                    "comparable remit",
                 ],
             },
         },
