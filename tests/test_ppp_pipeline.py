@@ -1,14 +1,120 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
 from app.ppp.enrichment import CandidatePublicProfileLookupInput, CandidatePublicProfileLookupTool
-from app.ppp.pipeline import PPPTaskError, _load_candidates_csv, _load_role_spec, run_ppp_pipeline
-from app.ppp.qa import validate_output_bundle
+from app.ppp.pipeline import PPPTaskError, _load_candidates_csv, _load_role_spec, _stabilize_candidate_brief, run_ppp_pipeline
+from app.ppp.qa import run_bundle_qa, validate_output_bundle
+from app.ppp.research import ResearchClientError, TavilyResearchClient
+from app.ppp.schema import validate_output_document
 from app.ppp.validator import validate_and_repair_candidate_payload
+
+
+def _candidate_from_prompt(payload: dict[str, object]) -> dict[str, str]:
+    research_package = payload["research_package"]
+    assert isinstance(research_package, dict)
+    identity = research_package["candidate_identity"]
+    assert isinstance(identity, dict)
+    return {
+        "full_name": str(identity["full_name"]),
+        "current_employer": str(identity["current_employer"]),
+        "current_title": str(identity["current_title"]),
+    }
+
+
+def _allowed_facts_from_prompt(payload: dict[str, object]) -> dict[str, object]:
+    allowed_facts = payload["allowed_facts"]
+    assert isinstance(allowed_facts, dict)
+    return allowed_facts
+
+
+def _allowed_fact_section(allowed_facts: dict[str, object], key: str) -> dict[str, Any]:
+    section = allowed_facts[key]
+    assert isinstance(section, dict)
+    return cast(dict[str, Any], section)
+
+
+def _build_enrichment(
+    tmp_path,
+    *,
+    full_name: str = "Example Candidate",
+    employer: str = "Example AM",
+    title: str = "Head of Distribution",
+    fixture: dict[str, Any] | None = None,
+):
+    fixture_path = tmp_path / f"{full_name.replace(' ', '_')}_fixture.json"
+    fixture_path.write_text(json.dumps({full_name: fixture or {}}), encoding="utf-8")
+    tool = CandidatePublicProfileLookupTool(fixture_path=str(fixture_path))
+    return tool.run(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name=full_name,
+            current_employer=employer,
+            current_title=title,
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+
+def _build_candidate_payload(
+    enrichment,
+    *,
+    career_narrative: str,
+    role_fit_justification: str,
+    outreach_hook: str,
+) -> dict[str, Any]:
+    candidates = [
+        {
+            "candidate_id": enrichment.candidate_id,
+            "full_name": enrichment.full_name,
+            "current_role": {
+                "title": enrichment.current_title,
+                "employer": enrichment.current_employer,
+                "tenure_years": enrichment.inferred_tenure_years or 2.0,
+            },
+            "career_narrative": career_narrative,
+            "experience_tags": ["distribution", "client coverage"],
+            "firm_aum_context": enrichment.firm_aum_context,
+            "mobility_signal": {
+                "score": 3,
+                "rationale": "Public chronology remains limited. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation.",
+            },
+            "role_fit": {
+                "role": "Head of Distribution / National BDM",
+                "score": 7,
+                "justification": role_fit_justification,
+            },
+            "outreach_hook": outreach_hook,
+        }
+    ]
+    for idx in range(2, 6):
+        candidates.append(
+            {
+                "candidate_id": f"candidate_{idx}",
+                "full_name": f"Placeholder {idx}",
+                "current_role": {"title": "Head of Distribution", "employer": f"Firm {idx}", "tenure_years": 2.0},
+                "career_narrative": (
+                    f"Placeholder {idx} is currently Head of Distribution at Firm {idx}, with public evidence pointing to an institutional lane. "
+                    "This profile looks commercially relevant on an adjacent basis because public evidence supports institutional channel relevance. "
+                    "The main boundary for now is that team scale not verified."
+                ),
+                "experience_tags": ["distribution"],
+                "firm_aum_context": f"Firm {idx} context requires verification.",
+                "mobility_signal": {"score": 3, "rationale": "Public chronology is limited. Move readiness remains uncertain pending conversation."},
+                "role_fit": {
+                    "role": "Head of Distribution / National BDM",
+                    "score": 6,
+                    "justification": f"Head of Distribution at Firm {idx} keeps this candidate in frame because public evidence supports institutional channel relevance. The biggest commercial gap is that team scale not verified. The first screening question should be whether team scale matches the role scope.",
+                },
+                "outreach_hook": f"I'm reaching out because your Head of Distribution background at Firm {idx} appears relevant to a comparable institutional distribution remit within a Head of Distribution / National BDM search.",
+            }
+        )
+    return {"candidates": candidates}
 
 
 def test_load_candidates_csv_requires_exactly_five_rows(tmp_path) -> None:
@@ -55,11 +161,11 @@ def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
     output_path = tmp_path / "output.json"
 
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
-    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_with_tools", lambda *args, **kwargs: "{}")
-
     def fake_generate_text(self, *, system_prompt: str, user_prompt: str, model: str, max_tokens: int, extra=None):
         payload = json.loads(user_prompt)
-        candidate = payload["candidate_input"]
+        candidate = _candidate_from_prompt(payload)
+        allowed_facts = _allowed_facts_from_prompt(payload)
+        tenure = _allowed_fact_section(allowed_facts, "tenure_years")
         candidate_id = payload["schema_rules"]["candidate_id"]
         return json.dumps(
             {
@@ -68,18 +174,26 @@ def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
                 "current_role": {
                     "title": candidate["current_title"],
                     "employer": candidate["current_employer"],
-                    "tenure_years": 2.5,
+                    "tenure_years": tenure["value"] or 2.5,
                 },
-                "career_narrative": f"{candidate['full_name']} has built a credible distribution career with visible client-facing scope. "
-                f"The current role at {candidate['current_employer']} suggests senior market exposure. Public data remains limited, so some details are framed cautiously.",
+                "career_narrative": f"{candidate['full_name']} is listed in the task input as {candidate['current_title']} at {candidate['current_employer']}. "
+                f"The title '{candidate['current_title']}' suggests senior distribution channel responsibility. "
+                "Public data remains limited, so some details are framed cautiously.",
                 "experience_tags": ["distribution", "leadership"],
-                "firm_aum_context": f"{candidate['current_employer']} requires live AUM verification.",
-                "mobility_signal": {"score": 3, "rationale": "Public tenure indicators suggest a possible but unconfirmed transition window."},
+                "firm_aum_context": (
+                    f"{candidate['current_employer']} appears to be a established market participant funds-management firm; "
+                    "exact AUM requires live public verification; distribution exposure inferred from the candidate's title."
+                ),
+                "mobility_signal": {
+                    "score": 3,
+                    "rationale": "Public chronology remains limited for this profile. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation."
+                },
                 "role_fit": {
                     "role": "Head of Distribution / National BDM",
                     "score": 7,
-                    "justification": f"{candidate['full_name']} appears relevant for funds-management distribution leadership, "
-                    "but channel depth still needs live verification.",
+                    "justification": f"{candidate['current_employer']} and the title {candidate['current_title']} suggest relevant distribution leadership exposure. "
+                    "The available public evidence still leaves channel depth and team scale uncertain. "
+                    "Further verification is required before the supported distribution exposure can be treated as complete.",
                 },
                 "outreach_hook": f"Your experience at {candidate['current_employer']} could make this distribution leadership brief worth discussing.",
             }
@@ -195,8 +309,439 @@ def test_lookup_tool_returns_enrichment_and_saves_artifact(tmp_path) -> None:
     assert result.tool_name == "candidate_public_profile_lookup"
     assert result.inferred_tenure_years == 2.4
     assert result.sources[0].label
-    assert result.evidence
+    assert result.claims
     assert saved.exists()
+
+
+def test_lookup_tool_live_mode_uses_research_client(tmp_path) -> None:
+    class FakeResearchClient:
+        def lookup_candidate(self, tool_input: CandidatePublicProfileLookupInput):
+            return type(
+                "Payload",
+                (),
+                {
+                    "mode": "live_web_fake",
+                    "fixture": {
+                        "verified_public_snippets": [f"{tool_input.full_name} appears on a public leadership page."],
+                        "tenure_years": 1.8,
+                        "firm_aum_context": f"{tool_input.current_employer} appears in public-web results with firm-scale references.",
+                        "likely_channel_evidence": ["Public snippets mention wholesale and institutional distribution."],
+                        "likely_experience_evidence": ["Public snippets tie the candidate to a senior client coverage remit."],
+                        "mobility_evidence": ["Recent public references suggest checking for a current transition window."],
+                        "missing_fields": ["verified team size"],
+                        "uncertain_fields": ["precise current-role tenure"],
+                        "confidence_notes": ["Live public-web research succeeded."],
+                        "sources": [
+                            {
+                                "label": "Leadership page",
+                                "source_type": "company_site",
+                                "url": "https://example.com/leadership",
+                                "confidence": "medium",
+                            }
+                        ],
+                    },
+                },
+            )()
+
+    tool = CandidatePublicProfileLookupTool(
+        fixture_path=str(tmp_path / "fixtures.json"),
+        mode="live",
+        research_client=FakeResearchClient(),
+    )
+    tool_input = CandidatePublicProfileLookupInput(
+        candidate_id="candidate_1",
+        full_name="Example Candidate",
+        current_employer="Example AM",
+        current_title="Head of Distribution",
+        linkedin_url="https://example.com/linkedin",
+    )
+
+    result = tool.run(tool_input)
+
+    assert result.tool_mode == "live_web"
+    assert result.claims[0].statement == "Example Candidate appears on a public leadership page."
+
+
+def test_lookup_tool_auto_mode_falls_back_to_fixture_on_live_error(tmp_path) -> None:
+    fixture_path = tmp_path / "fixtures.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "Example Candidate": {
+                    "verified_public_snippets": ["Fixture snippet."],
+                    "firm_aum_context": "Fixture context.",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FailingResearchClient:
+        def lookup_candidate(self, tool_input: CandidatePublicProfileLookupInput):
+            raise ResearchClientError("network down")
+
+    tool = CandidatePublicProfileLookupTool(
+        fixture_path=str(fixture_path),
+        mode="auto",
+        research_client=FailingResearchClient(),
+    )
+    tool_input = CandidatePublicProfileLookupInput(
+        candidate_id="candidate_1",
+        full_name="Example Candidate",
+        current_employer="Example AM",
+        current_title="Head of Distribution",
+        linkedin_url="https://example.com/linkedin",
+    )
+
+    result = tool.run(tool_input)
+
+    assert result.tool_mode == "fixture_fallback"
+    assert result.claims[0].statement == "Fixture snippet."
+    assert any("fell back to the controlled fixture" in note for note in result.verification.confidence_notes)
+
+
+@pytest.mark.parametrize(
+    ("title", "fixture", "expected"),
+    [
+        ("Director, Institutional Sales", {}, "institutional"),
+        ("Senior BDM Wholesale", {}, "wholesale"),
+        ("Head of Retail Sales", {}, "retail"),
+        (
+            "Head of Distribution",
+            {"likely_channel_evidence": ["Public snippets mention institutional and wholesale distribution coverage."]},
+            "mixed",
+        ),
+        ("Head of Distribution", {"likely_channel_evidence": ["Public snippets mention distribution leadership only."]}, "unclear"),
+    ],
+)
+def test_recruiter_signals_derives_channel_orientation(tmp_path, title: str, fixture: dict[str, Any], expected: str) -> None:
+    enrichment = _build_enrichment(tmp_path, title=title, fixture=fixture)
+    assert enrichment.recruiter_signals.channel_orientation == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "fixture", "expected"),
+    [
+        ("Head of Distribution", {}, "direct_match"),
+        ("Director, Institutional Sales", {}, "adjacent_match"),
+        ("Senior BDM Wholesale", {}, "step_up_candidate"),
+        ("Operations Manager", {"likely_channel_evidence": ["Public snippets mention operational leadership only."]}, "unclear_fit"),
+    ],
+)
+def test_recruiter_signals_derives_mandate_similarity(tmp_path, title: str, fixture: dict[str, Any], expected: str) -> None:
+    enrichment = _build_enrichment(tmp_path, title=title, fixture=fixture)
+    assert enrichment.recruiter_signals.mandate_similarity == expected
+
+
+def test_recruiter_signals_sell_points_and_gaps_are_claim_and_verification_backed(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        title="Director, Institutional Sales",
+        fixture={
+            "verified_public_snippets": ["Example Candidate is listed as Director, Institutional Sales at Example AM."],
+            "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            "likely_experience_evidence": ["Current employer/title pairing suggests relevance to funds-management client coverage at Example AM."],
+            "missing_fields": ["verified reporting line / team size"],
+            "uncertain_fields": ["direct Australian institutional coverage"],
+        },
+    )
+
+    assert enrichment.recruiter_signals.key_sell_points
+    assert len(enrichment.recruiter_signals.key_sell_points) <= 2
+    assert "public evidence supports institutional channel relevance" in enrichment.recruiter_signals.key_sell_points
+    assert len(enrichment.recruiter_signals.key_gaps) <= 2
+    assert enrichment.recruiter_signals.key_gaps[0] == "direct institutional coverage still needs confirmation"
+    assert "team scale not verified" in enrichment.recruiter_signals.key_gaps
+    research_package = enrichment.research_package()
+    assert research_package["recruiter_signals"]["channel_orientation"] == "institutional"
+
+
+def test_recruiter_usefulness_qa_accepts_lane_relevance_boundary_structure(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        title="Director, Institutional Sales",
+        fixture={
+            "verified_public_snippets": ["Example Candidate is listed as Director, Institutional Sales at Example AM."],
+            "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            "missing_fields": ["verified reporting line / team size"],
+            "uncertain_fields": ["direct Australian institutional coverage"],
+        },
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Director, Institutional Sales at Example AM, with public evidence pointing to an institutional lane. "
+                "This profile looks commercially relevant on an adjacent basis for the mandate because public evidence supports institutional channel relevance. "
+                "The main boundary for now is that direct institutional coverage still needs confirmation."
+            ),
+            role_fit_justification=(
+                "This candidate is in frame because public evidence supports institutional channel relevance. "
+                "The biggest commercial gap is that team scale not verified. "
+                "The first screening question should be whether team scale matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your background appears relevant to a comparable institutional distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+
+    report = run_bundle_qa(
+        output=output,
+        candidates={},
+        enrichments={"candidate_1": enrichment},
+    )
+
+    assert report.passed is True
+
+
+def test_career_narrative_usefulness_checks_forbid_generic_achievement_language(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path)
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is Head of Distribution at Example AM. "
+                "The profile suggests relevant distribution coverage. "
+                "Public evidence remains limited, but the candidate built the function."
+            ),
+            role_fit_justification=(
+                "This candidate is in frame because current title already signals senior distribution ownership. "
+                "The biggest commercial gap is that team scale not verified. "
+                "The first screening question should be whether team scale matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your background appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+
+    report = run_bundle_qa(output=output, candidates={}, enrichments={"candidate_1": enrichment})
+    assert any(item.check == "career_narrative_forbidden_phrase" for item in report.findings)
+
+
+def test_role_fit_usefulness_checks_require_screening_angle_and_block_strong_fit_language(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path, title="Director, Institutional Sales")
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Director, Institutional Sales at Example AM, with public evidence pointing to an institutional lane. "
+                "This profile looks commercially relevant on an adjacent basis because public evidence supports institutional channel relevance. "
+                "The main boundary for now is that team scale not verified."
+            ),
+            role_fit_justification=(
+                "This candidate is a strong fit because public evidence supports institutional channel relevance. "
+                "The biggest commercial gap is that team scale not verified. "
+                "Final fit depends on verification."
+            ),
+            outreach_hook="I'm reaching out because your background appears relevant to an adjacent but relevant institutional lane within a Head of Distribution / National BDM search.",
+        )
+    )
+
+    report = run_bundle_qa(output=output, candidates={}, enrichments={"candidate_1": enrichment})
+    checks = {item.check for item in report.findings}
+    assert "role_fit_forbidden_phrase" in checks
+    assert "role_fit_screening_angle" in checks
+
+
+def test_outreach_hook_usefulness_checks_reject_generic_invitation(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path, title="Senior BDM Wholesale")
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Senior BDM Wholesale at Example AM, with public evidence pointing to a wholesale lane. "
+                "This profile looks like a potential step-up option because public evidence supports wholesale channel relevance. "
+                "The main boundary for now is that team scale not verified."
+            ),
+            role_fit_justification=(
+                "This candidate is in frame because public evidence supports wholesale channel relevance. "
+                "The biggest commercial gap is that team scale not verified. "
+                "The key point to test in conversation is whether team scale matches the role scope."
+            ),
+            outreach_hook="Your background could be worth discussing.",
+        )
+    )
+
+    report = run_bundle_qa(output=output, candidates={}, enrichments={"candidate_1": enrichment})
+    checks = {item.check for item in report.findings}
+    assert "outreach_hook_generic_invitation" in checks
+    assert "outreach_hook_commercial_angle" in checks
+
+
+def test_firm_aum_context_explicitly_surfaces_unverifiable_context(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        employer="Example AM",
+        fixture={
+            "firm_aum_context": "Example AM appears to be an established active manager.",
+        },
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Example AM, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Example AM because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Example AM appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+    candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
+    assert "unable to verify exact aum from public sources" in candidate.firm_aum_context.lower()
+    assert "based on firm type and sector context" in candidate.firm_aum_context.lower()
+    assert "$" not in candidate.firm_aum_context
+
+
+def test_qa_flags_firm_aum_context_that_hides_unverifiable_status(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path, fixture={"firm_aum_context": "Example AM appears to be an established active manager."})
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Example AM, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Example AM because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Example AM appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+    output.candidates[0].firm_aum_context = "Established active manager with mid-tier scale."
+
+    report = run_bundle_qa(output=output, candidates={}, enrichments={"candidate_1": enrichment})
+    assert any(item.check == "firm_aum_context_uncertainty" for item in report.findings)
+
+
+def test_mobility_rationale_requires_chronology_uncertainty_and_follow_up(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path, fixture={"tenure_years": 2.3})
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Example AM, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Example AM because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Example AM appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+    candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
+    assert "public chronology suggests approximately" in candidate.mobility_signal.rationale.lower()
+    assert "no direct public signal of move readiness is visible" in candidate.mobility_signal.rationale.lower()
+    assert "uncertain pending conversation" in candidate.mobility_signal.rationale.lower()
+
+
+def test_qa_flags_mobility_rationale_that_sounds_like_recruiter_intuition(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path, fixture={"tenure_years": 2.3})
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Example AM, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Example AM because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Example AM appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+    output.candidates[0].mobility_signal.rationale = "The candidate looks settled and likely has low near-term mobility."
+
+    report = run_bundle_qa(output=output, candidates={}, enrichments={"candidate_1": enrichment})
+    checks = {item.check for item in report.findings}
+    assert "mobility_signal_forbidden_phrase" in checks
+    assert "mobility_signal_uncertainty_structure" in checks
+
+
+def test_tavily_research_client_builds_fixture_from_results() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Example Candidate appointed to lead distribution",
+                        "url": "https://example.com/leadership",
+                        "content": "Example Candidate joined Example AM in 2024 to lead wholesale distribution across Australia.",
+                    },
+                    {
+                        "title": "Example AM firm overview",
+                        "url": "https://example.com/about",
+                        "content": "Example AM is an investment manager with A$10B in assets under management.",
+                    },
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name="Example Candidate",
+            current_employer="Example AM",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    assert payload.mode == "live_web_tavily"
+    assert payload.fixture["tenure_years"] == 2.0
+    assert isinstance(payload.fixture["sources"], list)
+    assert isinstance(payload.fixture["likely_channel_evidence"], list)
+
+
+def test_tavily_research_client_filters_same_name_but_wrong_employer() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Andrew Swan | Fund manager factsheet",
+                        "url": "https://www2.trustnet.com/managers/factsheet/andrew-swan",
+                        "content": "Andrew Swan is Head of Asia Equities at Man Group and joined in 2020.",
+                    },
+                    {
+                        "title": "Andrew Swan joins Pendal distribution team",
+                        "url": "https://pendalgroup.com/leadership/andrew-swan",
+                        "content": "Andrew Swan joined Pendal Group in 2024 as Head of Distribution in Australia.",
+                    },
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name="Andrew Swan",
+            current_employer="Pendal Group",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    snippets = payload.fixture["verified_public_snippets"]
+    assert isinstance(snippets, list)
+    assert len(snippets) == 1
+    assert "Pendal Group" in snippets[0]
 
 
 def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> None:
@@ -236,12 +781,11 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
     )
 
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
-    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_with_tools", lambda *args, **kwargs: "{}")
-
     def fake_generate_text(self, *, system_prompt: str, user_prompt: str, model: str, max_tokens: int, extra=None):
         payload = json.loads(user_prompt)
-        candidate = payload["candidate_input"]
-        enrichment = payload["enrichment"]
+        candidate = _candidate_from_prompt(payload)
+        allowed_facts = _allowed_facts_from_prompt(payload)
+        tenure = _allowed_fact_section(allowed_facts, "tenure_years")
         candidate_id = payload["schema_rules"]["candidate_id"]
         return json.dumps(
             {
@@ -250,22 +794,23 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
                 "current_role": {
                     "title": candidate["current_title"],
                     "employer": candidate["current_employer"],
-                    "tenure_years": enrichment["inferred_tenure_years"],
+                    "tenure_years": tenure["value"] or 2.0,
                 },
-                "career_narrative": f"{candidate['full_name']} has visible distribution experience. "
-                "The enrichment payload suggests relevant channel exposure. "
+                "career_narrative": f"{candidate['full_name']} is listed at {candidate['current_employer']} in the research package. "
+                "The enrichment payload suggests relevant distribution channel exposure. "
                 "The final fit still depends on live verification of team and network depth.",
                 "experience_tags": ["distribution", "client coverage"],
-                "firm_aum_context": enrichment["firm_aum_context"],
+                "firm_aum_context": f"{candidate['current_employer']} context from fixture.",
                 "mobility_signal": {
                     "score": 3,
-                    "rationale": "The enrichment evidence supports a moderate but still unverified mobility case."
+                    "rationale": "Public chronology is still limited in the enrichment package. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation."
                 },
                 "role_fit": {
                     "role": "Head of Distribution / National BDM",
                     "score": 7,
-                    "justification": f"{candidate['full_name']} has evidence of distribution exposure relevant to the target mandate. "
-                    "A final recruiter view would still require live verification of network depth and leadership scope."
+                    "justification": f"{candidate['current_employer']} and the supported distribution exposure are relevant to the target role. "
+                    "The available public evidence still leaves network depth and leadership scope uncertain. "
+                    "Further verification is required before the supported distribution exposure can be treated as complete."
                 },
                 "outreach_hook": f"Your background at {candidate['current_employer']} could make this leadership search worth a conversation."
             }
@@ -284,7 +829,7 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
 
     assert output_path.exists()
     assert len(list(intermediate_dir.glob("*_enriched.json"))) == 5
-    assert result.candidates[0].firm_aum_context == "Pendal Group context from fixture."
+    assert "unable to verify exact aum from public sources" in result.candidates[0].firm_aum_context.lower()
 
 
 def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monkeypatch) -> None:
@@ -303,13 +848,13 @@ def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monke
     output_path = tmp_path / "output.json"
 
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
-    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_with_tools", lambda *args, **kwargs: "{}")
-
     call_counter = {"count": 0}
 
     def fake_generate_text(self, *, system_prompt: str, user_prompt: str, model: str, max_tokens: int, extra=None):
         payload = json.loads(user_prompt)
-        candidate = payload["candidate_input"]
+        candidate = _candidate_from_prompt(payload)
+        allowed_facts = _allowed_facts_from_prompt(payload)
+        tenure = _allowed_fact_section(allowed_facts, "tenure_years")
         call_counter["count"] += 1
         if call_counter["count"] == 1:
             return '{"candidate_id": "candidate_1"}'
@@ -320,19 +865,26 @@ def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monke
                 "current_role": {
                     "title": candidate["current_title"],
                     "employer": candidate["current_employer"],
-                    "tenure_years": 2.0,
+                    "tenure_years": tenure["value"] or 2.0,
                 },
-                "career_narrative": f"{candidate['full_name']} currently holds a senior client-facing role. "
-                "The profile points to relevant distribution exposure. "
+                "career_narrative": f"{candidate['full_name']} is listed in the task input as {candidate['current_title']} at {candidate['current_employer']}. "
+                f"The title '{candidate['current_title']}' points to relevant distribution exposure. "
                 "Public evidence still leaves some scope questions open.",
                 "experience_tags": ["distribution", "client coverage"],
-                "firm_aum_context": f"{candidate['current_employer']} context requires live AUM verification.",
-                "mobility_signal": {"score": 3, "rationale": "The available evidence supports a moderate but unconfirmed mobility case."},
+                "firm_aum_context": (
+                    f"{candidate['current_employer']} appears to be a established market participant funds-management firm; "
+                    "exact AUM requires live public verification; distribution exposure inferred from the candidate's title."
+                ),
+                "mobility_signal": {
+                    "score": 3,
+                    "rationale": "Public chronology remains limited for this profile. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation."
+                },
                 "role_fit": {
                     "role": "Head of Distribution / National BDM",
                     "score": 7,
-                    "justification": f"{candidate['full_name']} has directional fit for the target distribution mandate, "
-                    f"with current experience at {candidate['current_employer']} still requiring scope verification."
+                    "justification": f"{candidate['current_employer']} and the title {candidate['current_title']} are relevant to the target distribution role. "
+                    "The available public evidence still leaves current scope, channel depth, and leadership scale uncertain. "
+                    "Further verification is required before the supported distribution exposure can be treated as complete."
                 },
                 "outreach_hook": f"Your experience at {candidate['current_employer']} could make this role worth discussing."
             }
@@ -477,7 +1029,6 @@ def test_run_ppp_pipeline_writes_failure_artifact_on_candidate_error(tmp_path, m
     intermediate_dir = tmp_path / "intermediate"
 
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
-    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_with_tools", lambda *args, **kwargs: "{}")
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", lambda *args, **kwargs: '{"candidate_id":"candidate_1"}')
 
     with pytest.raises(PPPTaskError):

@@ -1,17 +1,125 @@
 from __future__ import annotations
 
+import difflib
 import json
 import re
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from app.ppp.enrichment import CandidateEnrichmentResult, validate_enrichment_payload
+from app.ppp.enrichment import CandidateEnrichmentResult, ResearchClaim, validate_enrichment_payload
 from app.ppp.models import CandidateCSVRow
 from app.ppp.schema import CandidateBrief, PPPOutput, validate_output_document
 
-QUALIFIER_TERMS = ("unverified", "verification", "estimated", "limited public visibility", "cautious", "approx")
+QUALIFIER_TERMS = (
+    "unverified",
+    "verification",
+    "unable to verify",
+    "estimated",
+    "limited public visibility",
+    "cautious",
+    "approx",
+    "open question",
+    "questions open",
+    "public evidence remains limited",
+    "not verified",
+    "remains unclear",
+    "needs confirmation",
+    "should be verified",
+    "boundary",
+    "public evidence does not confirm",
+    "treated here as",
+    "pending conversation",
+    "should be confirmed in conversation",
+    "remains unverified",
+)
 PLACEHOLDER_TERMS = ("unknown candidate", "n/a", "tbd", "lorem ipsum")
+CAREER_NARRATIVE_FORBIDDEN_TERMS = (
+    "built the function",
+    "transformed",
+    "led the build-out",
+    "established track record",
+    "positioned as",
+    "scaled the function",
+    "drove growth",
+)
+MOBILITY_FORBIDDEN_TERMS = (
+    "settled",
+    "itchy",
+    "ready to move",
+    "open to move",
+    "flight risk",
+    "unlikely to move",
+    "natural transition",
+    "multi-year commitment",
+    "mobility appetite",
+)
+ROLE_FIT_FORBIDDEN_TERMS = (
+    "proven",
+    "deep network",
+    "strong fit",
+    "well beyond the role",
+    "demonstrated capability",
+    "established profile",
+)
+STOPWORDS = {
+    "about",
+    "across",
+    "appears",
+    "around",
+    "asset",
+    "based",
+    "build",
+    "built",
+    "candidate",
+    "channel",
+    "client",
+    "coverage",
+    "current",
+    "exact",
+    "experience",
+    "firm",
+    "funds",
+    "leadership",
+    "limited",
+    "management",
+    "manager",
+    "public",
+    "remains",
+    "still",
+    "their",
+    "there",
+    "would",
+    "should",
+    "requires",
+    "verification",
+}
+LANE_TERMS = ("institutional", "wholesale", "wealth", "retail", "ifa", "platform", "distribution")
+SCREENING_ANGLE_TERMS = ("first screening question", "key point to test", "test in conversation", "screening question", "screening conversation")
+GENERIC_INVITATION_TERMS = (
+    "welcome a conversation",
+    "caught our attention",
+    "worth discussing",
+    "worth a conversation",
+)
+COMMERCIAL_ANGLE_TERMS = (
+    "institutional",
+    "wholesale",
+    "wealth",
+    "retail",
+    "build-out",
+    "build out",
+    "expansion",
+    "step-up",
+    "step up",
+    "comparable",
+    "adjacent",
+    "distribution remit",
+    "distribution brief",
+    "coverage brief",
+    "coverage",
+    "remit",
+)
 
 
 class QAFinding(BaseModel):
@@ -99,6 +207,18 @@ def _check_candidate(
     if _sentence_count(candidate.outreach_hook) != 1:
         findings.append(_error(candidate.candidate_id, "outreach_hook_sentences", "outreach_hook must contain exactly 1 sentence."))
 
+    mobility_sentences = _sentence_count(candidate.mobility_signal.rationale)
+    if mobility_sentences < 1 or mobility_sentences > 2:
+        findings.append(
+            _error(candidate.candidate_id, "mobility_signal_sentences", "mobility_signal.rationale must contain 1 to 2 sentences.")
+        )
+
+    role_fit_sentences = _sentence_count(candidate.role_fit.justification)
+    if role_fit_sentences != 3:
+        findings.append(
+            _error(candidate.candidate_id, "role_fit_sentences", "role_fit.justification must contain exactly 3 sentences.")
+        )
+
     combined = " ".join(
         [
             candidate.career_narrative,
@@ -112,21 +232,50 @@ def _check_candidate(
         if term in combined:
             findings.append(_error(candidate.candidate_id, "placeholder_text", f"Output contains placeholder text: '{term}'."))
 
-    if not _justification_mentions_evidence(candidate, input_candidate):
+    for term in CAREER_NARRATIVE_FORBIDDEN_TERMS:
+        if term in candidate.career_narrative.lower():
+            findings.append(
+                _error(candidate.candidate_id, "career_narrative_forbidden_phrase", f"career_narrative contains forbidden phrasing: '{term}'.")
+            )
+
+    for term in MOBILITY_FORBIDDEN_TERMS:
+        if term in candidate.mobility_signal.rationale.lower():
+            findings.append(
+                _error(candidate.candidate_id, "mobility_signal_forbidden_phrase", f"mobility_signal contains forbidden phrasing: '{term}'.")
+            )
+
+    for term in ROLE_FIT_FORBIDDEN_TERMS:
+        if term in candidate.role_fit.justification.lower():
+            findings.append(
+                _error(candidate.candidate_id, "role_fit_forbidden_phrase", f"role_fit.justification contains forbidden phrasing: '{term}'.")
+            )
+
+    findings.extend(_check_recruiter_usefulness(candidate, enrichment))
+    findings.extend(_check_uncertainty_expression(candidate, enrichment))
+
+    if not _justification_mentions_evidence(candidate, input_candidate, enrichment):
         findings.append(
             _error(
                 candidate.candidate_id,
-                "justification_evidence",
-                "role_fit.justification should reference employer, title, or evidence-backed experience tags.",
+                "claim_boundary_role_fit",
+                "role_fit.justification should stay anchored to employer, title, or supported research claims.",
             )
         )
 
-    if _mentions_specific_aum_without_qualifier(candidate.firm_aum_context):
+    if _mentions_specific_aum_without_support(candidate.firm_aum_context, enrichment):
         findings.append(
             _error(
                 candidate.candidate_id,
-                "firm_aum_context_confidence",
-                "firm_aum_context mentions a specific AUM figure without a qualifying phrase such as estimated or to verify.",
+                "claim_boundary_firm_aum_context",
+                "firm_aum_context mentions a specific AUM figure without verified claim support or qualifying language.",
+            )
+        )
+    if enrichment is not None and not _firm_aum_context_handles_uncertainty(candidate.firm_aum_context, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "firm_aum_context_uncertainty",
+                "firm_aum_context should explicitly state when exact AUM cannot be verified and keep any estimate qualitative.",
             )
         )
 
@@ -135,24 +284,33 @@ def _check_candidate(
             findings.append(
                 _error(
                     candidate.candidate_id,
-                    "tenure_confidence",
-                    "tenure_years is not strongly grounded in enrichment and the narrative should signal uncertainty more clearly.",
+                    "claim_boundary_tenure_confidence",
+                    "tenure_years is not grounded in a supported tenure claim and the narrative should signal uncertainty more clearly.",
                 )
             )
         if enrichment.inferred_tenure_years is not None and abs(candidate.current_role.tenure_years - enrichment.inferred_tenure_years) > 0.25:
             findings.append(
                 _error(
                     candidate.candidate_id,
-                    "tenure_alignment",
-                    "current_role.tenure_years deviates materially from the enrichment estimate.",
+                    "claim_boundary_tenure_alignment",
+                    "current_role.tenure_years deviates materially from the supported tenure claim.",
                 )
             )
-        if enrichment.uncertain_fields and not _contains_qualifier(combined):
+        if enrichment.verification.uncertain_fields and not _contains_qualifier(combined):
             findings.append(
                 _error(
                     candidate.candidate_id,
-                    "uncertainty_language",
-                    "Enrichment marks fields as uncertain, but the final output does not clearly signal verification limits.",
+                    "claim_boundary_uncertainty_language",
+                    "The research package marks fields as uncertain, but the final output does not clearly signal verification limits.",
+                )
+            )
+        unsupported_output_fields = _unsupported_output_fields(candidate, enrichment)
+        for field_name in unsupported_output_fields:
+            findings.append(
+                _error(
+                    candidate.candidate_id,
+                    "claim_boundary_output_field",
+                    f"{field_name} appears to go beyond the supported research claim set.",
                 )
             )
 
@@ -178,7 +336,11 @@ def _load_enrichments(intermediate_dir: str) -> dict[str, CandidateEnrichmentRes
     return results
 
 
-def _justification_mentions_evidence(candidate: CandidateBrief, input_candidate: CandidateCSVRow | None) -> bool:
+def _justification_mentions_evidence(
+    candidate: CandidateBrief,
+    input_candidate: CandidateCSVRow | None,
+    enrichment: CandidateEnrichmentResult | None,
+) -> bool:
     text = candidate.role_fit.justification.lower()
     if input_candidate is not None:
         if input_candidate.current_employer.lower() in text:
@@ -186,12 +348,32 @@ def _justification_mentions_evidence(candidate: CandidateBrief, input_candidate:
         title_tokens = [part.strip().lower() for part in input_candidate.current_title.replace("/", " ").split() if len(part.strip()) > 3]
         if any(token in text for token in title_tokens):
             return True
+    if enrichment is not None:
+        signal_phrases = [
+            *enrichment.recruiter_signals.key_sell_points,
+            *enrichment.recruiter_signals.key_gaps,
+            enrichment.recruiter_signals.channel_orientation,
+        ]
+        if any(phrase.lower() in text for phrase in signal_phrases if phrase and phrase != "unclear"):
+            return True
+        claims = enrichment.claims_for_output_field("role_fit")
+        if _text_grounded_in_claims(text, claims, field_name="role_fit"):
+            return True
     return any(tag.lower() in text for tag in candidate.experience_tags)
 
 
-def _mentions_specific_aum_without_qualifier(text: str) -> bool:
+def _mentions_specific_aum_without_support(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
     has_amount = bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", text.lower()))
-    return has_amount and not _contains_qualifier(text)
+    if not has_amount:
+        return False
+    if _contains_qualifier(text):
+        return False
+    if enrichment is None:
+        return True
+    for claim in enrichment.claims_for_output_field("firm_aum_context"):
+        if claim.verification_status == "verified" and re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", claim.statement.lower()):
+            return False
+    return True
 
 
 def _contains_qualifier(text: str) -> bool:
@@ -199,9 +381,338 @@ def _contains_qualifier(text: str) -> bool:
     return any(term in lowered for term in QUALIFIER_TERMS)
 
 
+def _unsupported_output_fields(candidate: CandidateBrief, enrichment: CandidateEnrichmentResult) -> list[str]:
+    unsupported: list[str] = []
+    checks = {
+        "career_narrative": candidate.career_narrative,
+        "mobility_signal": candidate.mobility_signal.rationale,
+        "firm_aum_context": candidate.firm_aum_context,
+        "role_fit": candidate.role_fit.justification,
+    }
+    for field_name, text in checks.items():
+        support = enrichment.field_support(field_name)
+        claims = enrichment.claims_for_output_field(field_name)
+        if support.supported_by_claim_ids and _field_exceeds_claim_boundary(text, claims, field_name=field_name):
+            unsupported.append(field_name)
+    return unsupported
+
+
+def _field_exceeds_claim_boundary(text: str, claims: list[ResearchClaim], *, field_name: str) -> bool:
+    if not claims:
+        return False
+    return not _text_grounded_in_claims(text, claims, field_name=field_name)
+
+
+def _text_grounded_in_claims(text: str, claims: list[ResearchClaim], *, field_name: str) -> bool:
+    sentences = [sentence for sentence in _split_sentences(text) if sentence]
+    if not sentences:
+        return False
+
+    if field_name == "firm_aum_context":
+        return _firm_context_is_grounded(text, claims)
+
+    if field_name == "role_fit":
+        return _all_sentences_supported(sentences, claims, min_overlap=1, min_similarity=0.48)
+
+    if field_name == "mobility_signal":
+        return _all_sentences_supported(sentences, claims, min_overlap=1, min_similarity=0.42)
+
+    if field_name == "outreach_hook":
+        return _all_sentences_supported(sentences, claims, min_overlap=1, min_similarity=0.38)
+
+    return _all_sentences_supported(sentences, claims, min_overlap=2, min_similarity=0.45)
+
+
+def _firm_context_is_grounded(text: str, claims: list[ResearchClaim]) -> bool:
+    if not claims:
+        return True
+    if _contains_qualifier(text):
+        return True
+
+    claim_numbers = {number for claim in claims for number in _extract_numbers(claim.statement)}
+    text_numbers = _extract_numbers(text)
+    if text_numbers and not text_numbers.issubset(claim_numbers):
+        return False
+
+    return _all_sentences_supported(_split_sentences(text), claims, min_overlap=1, min_similarity=0.4)
+
+
+def _all_sentences_supported(
+    sentences: list[str],
+    claims: list[ResearchClaim],
+    *,
+    min_overlap: int,
+    min_similarity: float,
+) -> bool:
+    return all(
+        _sentence_supported_by_claims(sentence, claims, min_overlap=min_overlap, min_similarity=min_similarity)
+        for sentence in sentences
+    )
+
+
+def _sentence_supported_by_claims(
+    sentence: str,
+    claims: list[ResearchClaim],
+    *,
+    min_overlap: int,
+    min_similarity: float,
+) -> bool:
+    lowered = sentence.lower()
+    if _contains_qualifier(lowered):
+        return True
+
+    sentence_tokens = _meaningful_tokens(lowered)
+    if not sentence_tokens:
+        return True
+
+    for claim in claims:
+        claim_tokens = _meaningful_tokens(claim.statement.lower())
+        overlap = len(sentence_tokens & claim_tokens)
+        similarity = difflib.SequenceMatcher(a=lowered, b=claim.statement.lower()).ratio()
+        if overlap >= min_overlap or similarity >= min_similarity:
+            return True
+        if _extract_numbers(sentence).issubset(_extract_numbers(claim.statement)) and overlap >= 1:
+            return True
+    return False
+
+
+def _meaningful_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-zA-Z]{4,}", text.lower())
+        if token not in STOPWORDS
+    }
+
+
+def _extract_numbers(text: str) -> set[str]:
+    return set(re.findall(r"(?:aud\s*)?\$?\d+(?:\.\d+)?\s*[bm]?", text.lower()))
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", text.strip()) if part.strip()]
+
+
 def _sentence_count(text: str) -> int:
-    return len([item for item in re.split(r"[.!?]+", text) if item.strip()])
+    return len(_split_sentences(text))
 
 
 def _error(candidate_id: str | None, check: str, message: str) -> QAFinding:
     return QAFinding(candidate_id=candidate_id, severity="error", check=check, message=message)
+
+
+def _check_recruiter_usefulness(
+    candidate: CandidateBrief,
+    enrichment: CandidateEnrichmentResult | None,
+) -> list[QAFinding]:
+    findings: list[QAFinding] = []
+
+    career_text = candidate.career_narrative.lower()
+    if not _contains_lane_signal(candidate.career_narrative, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "career_narrative_lane_signal",
+                "career_narrative must include a candidate-specific lane, channel, or remit signal.",
+            )
+        )
+    if not _contains_qualifier(candidate.career_narrative):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "career_narrative_boundary",
+                "career_narrative must include an explicit verification boundary or uncertainty signal.",
+            )
+        )
+    if _looks_like_title_plus_caution_only(candidate.career_narrative):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "career_narrative_generic",
+                "career_narrative cannot stop at title summary plus generic caution; it should also explain lane relevance.",
+            )
+        )
+
+    role_fit_text = candidate.role_fit.justification.lower()
+    if not _contains_supported_strength(candidate.role_fit.justification, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "role_fit_supported_strength",
+                "role_fit.justification must include at least one supported strength.",
+            )
+        )
+    if not _contains_concrete_gap(candidate.role_fit.justification, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "role_fit_concrete_gap",
+                "role_fit.justification must name at least one concrete commercial gap.",
+            )
+        )
+    if not any(term in role_fit_text for term in SCREENING_ANGLE_TERMS):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "role_fit_screening_angle",
+                "role_fit.justification must include an explicit screening angle or what-to-test sentence.",
+            )
+        )
+
+    hook_text = candidate.outreach_hook.lower()
+    if any(term in hook_text for term in GENERIC_INVITATION_TERMS) and not _contains_specific_commercial_angle(candidate.outreach_hook, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "outreach_hook_generic_invitation",
+                "outreach_hook cannot be just a generic invitation; it needs a concrete commercial angle.",
+            )
+        )
+    if not _contains_specific_commercial_angle(candidate.outreach_hook, enrichment):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "outreach_hook_commercial_angle",
+                "outreach_hook must include one specific commercial angle grounded in recruiter_signals or supported claims.",
+            )
+        )
+
+    return findings
+
+
+def _check_uncertainty_expression(
+    candidate: CandidateBrief,
+    enrichment: CandidateEnrichmentResult | None,
+) -> list[QAFinding]:
+    findings: list[QAFinding] = []
+
+    if not _mobility_has_uncertainty_structure(candidate.mobility_signal.rationale):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "mobility_signal_uncertainty_structure",
+                "mobility_signal.rationale must separate chronology observation from absent move-readiness evidence and conversation follow-up.",
+            )
+        )
+
+    if not _contains_qualifier(candidate.career_narrative):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "career_narrative_uncertainty_marker",
+                "career_narrative must make unverified scope or trajectory limits explicit.",
+            )
+        )
+
+    role_fit_text = candidate.role_fit.justification.lower()
+    if (
+        "unverified" not in role_fit_text
+        and "does not confirm" not in role_fit_text
+        and "remains unclear" not in role_fit_text
+        and "not verified" not in role_fit_text
+    ):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "role_fit_unverified_gap_language",
+                "role_fit.justification must distinguish supported relevance from unverified requirement coverage.",
+            )
+        )
+
+    return findings
+
+
+def _contains_lane_signal(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
+    lowered = text.lower()
+    if any(term in lowered for term in LANE_TERMS):
+        return True
+    if enrichment is None:
+        return False
+    orientation = enrichment.recruiter_signals.channel_orientation
+    return orientation != "unclear" and orientation in lowered
+
+
+def _looks_like_title_plus_caution_only(text: str) -> bool:
+    sentences = _split_sentences(text.lower())
+    if len(sentences) < 3:
+        return False
+    second_sentence = sentences[1]
+    third_sentence = sentences[2]
+    has_relevance_signal = any(term in second_sentence for term in LANE_TERMS) or any(
+        term in second_sentence for term in ("relevant", "mandate", "match", "remit", "frame", "commercial")
+    )
+    return not has_relevance_signal and _contains_qualifier(third_sentence)
+
+
+def _contains_supported_strength(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
+    lowered = text.lower()
+    if enrichment is not None:
+        sell_points = [point.lower() for point in enrichment.recruiter_signals.key_sell_points]
+        if any(point in lowered for point in sell_points):
+            return True
+        return _text_grounded_in_claims(text, enrichment.claims_for_output_field("role_fit"), field_name="role_fit")
+    return any(term in lowered for term in ("title", "employer", "distribution", "institutional", "wholesale", "wealth", "retail"))
+
+
+def _contains_concrete_gap(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
+    lowered = text.lower()
+    if enrichment is not None:
+        gaps = [gap.lower() for gap in enrichment.recruiter_signals.key_gaps]
+        if any(gap in lowered for gap in gaps):
+            return True
+    concrete_gap_terms = (
+        "team scale",
+        "reporting line",
+        "channel breadth",
+        "network depth",
+        "coverage depth",
+        "not verified",
+        "remains unclear",
+        "needs confirmation",
+    )
+    return any(term in lowered for term in concrete_gap_terms)
+
+
+def _contains_specific_commercial_angle(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
+    lowered = text.lower()
+    if any(term in lowered for term in COMMERCIAL_ANGLE_TERMS):
+        return True
+    if enrichment is None:
+        return False
+    signals = enrichment.recruiter_signals
+    if signals.channel_orientation != "unclear" and signals.channel_orientation in lowered:
+        return True
+    if signals.mandate_similarity.replace("_", " ") in lowered:
+        return True
+    return any(point.lower() in lowered for point in signals.key_sell_points)
+
+
+def _firm_aum_context_handles_uncertainty(text: str, enrichment: CandidateEnrichmentResult) -> bool:
+    has_verified_numeric = any(
+        claim.verification_status == "verified" and bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", claim.statement.lower()))
+        for claim in enrichment.claims_for_output_field("firm_aum_context")
+    )
+    if has_verified_numeric:
+        return True
+    lowered = text.lower()
+    if bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", lowered)):
+        return False
+    required_markers = (
+        "unable to verify",
+        "public evidence does not confirm",
+        "estimated",
+        "treated here as",
+        "based on firm type and sector context",
+    )
+    return any(marker in lowered for marker in required_markers)
+
+
+def _mobility_has_uncertainty_structure(text: str) -> bool:
+    lowered = text.lower()
+    chronology_markers = ("public chronology", "approximately", "current-role tenure", "years in the current role")
+    uncertainty_markers = ("uncertain", "no direct public signal", "pending conversation", "requires follow-up")
+    follow_up_markers = ("pending conversation", "follow-up", "should be treated as uncertain")
+    return (
+        any(marker in lowered for marker in chronology_markers)
+        and any(marker in lowered for marker in uncertainty_markers)
+        and any(marker in lowered for marker in follow_up_markers)
+    )

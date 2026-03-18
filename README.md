@@ -2,17 +2,20 @@
 
 Claude-powered candidate briefing agent for executive search, built for the Platinum Pacific Partners AI & Automation Intern task.
 
-This submission focuses on a real PPP-style workflow: take a `candidates.csv`, enrich each profile with structured public-research evidence, generate recruiter-usable candidate briefings in strict JSON, and run a final QA layer before submission.
+This submission focuses on a real PPP-style workflow: take a `candidates.csv`, collect and normalize structured public-research evidence for each profile, generate recruiter-usable candidate briefings in strict JSON, and block outputs that cross evidence boundaries before submission.
+
+It is intentionally designed to handle partial or unverified candidate inputs. When public evidence is incomplete, the system prefers explicit uncertainty over fabricated precision and treats unverified AUM, tenure, mobility, and remit details as recruiter-facing caveats rather than hidden model assumptions.
 
 ## What It Does
 
 - Accepts the PPP candidate CSV input format with exactly 5 rows.
-- Runs a two-stage pipeline:
-  1. `candidate_public_profile_lookup` enrichment
-  2. Claude-based structured briefing generation
-- Produces `output.json` matching the required schema.
-- Saves intermediate enrichment artifacts for review and debugging.
-- Runs schema, content, and business-rule QA before treating the output as complete.
+- Runs a three-stage pipeline:
+  1. research adapter
+  2. Claude-based reasoning and recruiter-facing formatting
+  3. boundary-aware QA
+- Produces `output.json` as the submission-safe final deliverable.
+- Saves intermediate research-package artifacts for review and debugging.
+- Runs schema, content, business-rule, and evidence-boundary QA before treating the output as complete.
 
 ## Quick Start
 
@@ -29,6 +32,19 @@ Set:
 export ANTHROPIC_API_KEY=your_key_here
 ```
 
+Optional for real public-web research:
+
+```bash
+export PPP_RESEARCH_MODE=auto
+export TAVILY_API_KEY=your_tavily_key_here
+```
+
+For the realistic public-data rerun used during manual review:
+
+```bash
+streamlit run app/ui/ppp_task_app.py
+```
+
 ## Example Command
 
 ```bash
@@ -37,7 +53,21 @@ python3 scripts/run_ppp_task.py \
   --output data/ppp/output.json \
   --role-spec data/ppp/role_spec.json \
   --research-fixtures data/ppp/research_fixtures.json \
+  --research-mode auto \
   --intermediate-dir data/ppp/intermediate \
+  --model claude-sonnet-4-5
+```
+
+Realistic public-data example:
+
+```bash
+python3 scripts/run_ppp_task.py \
+  --input data/ppp/candidates_realistic_public.csv \
+  --output data/ppp/output.json \
+  --role-spec data/ppp/role_spec.json \
+  --research-fixtures data/ppp/research_fixtures.json \
+  --research-mode auto \
+  --intermediate-dir data/ppp/intermediate_realistic_public \
   --model claude-sonnet-4-5
 ```
 
@@ -46,6 +76,32 @@ Optional non-technical runner:
 ```bash
 streamlit run app/ui/ppp_task_app.py
 ```
+
+Streamlit runner flow:
+
+1. Start the app with the command above.
+2. In **Step 1: Configure Inputs**, set:
+   - `Candidate CSV`: `data/ppp/candidates_realistic_public.csv`
+   - `Research Mode`: `auto` or `live`
+   - `Intermediate Directory`: `data/ppp/intermediate_realistic_public`
+3. Keep the default role spec, output path, and fixtures unless you are intentionally testing alternates.
+4. Review the **Current Paths** block so you can see exactly which files will be read and written.
+5. Click **Run PPP Task**.
+6. Wait for the app to generate:
+   - `data/ppp/output.json`
+   - `data/ppp/intermediate_realistic_public/candidate_*_enriched.json`
+   - `data/ppp/intermediate_realistic_public/qa_report.json`
+7. Review the **Output Preview** in the app.
+8. Click **Validate Existing Output** to rerun validation without regenerating the briefings.
+9. Review the **QA Report** section in the app and confirm it passes before submission.
+
+What a non-technical reviewer should expect to see:
+
+- one button to generate the deliverable
+- one button to validate the latest deliverable
+- a preview of the final JSON
+- a preview of the QA report
+- no need to edit Python files or use the terminal after Streamlit is running
 
 Pre-submission validation:
 
@@ -83,20 +139,36 @@ The final JSON contains:
 
 ## Architecture Overview
 
-The pipeline uses a two-stage pattern because it is more reliable than asking one prompt to both research and format:
+The pipeline now uses a three-stage pattern with an explicit research package between collection and writing:
 
-1. **Enrichment / tool stage**
-   The system gathers structured evidence for each candidate: verified snippets, tenure clues, channel indicators, firm context, missing fields, uncertain fields, sources, and confidence notes.
-2. **Structured generation stage**
-   Claude receives the candidate input, enrichment payload, role spec, and strict output requirements, then returns a single candidate JSON object.
-3. **Validation and QA stage**
-   The system repairs minor formatting issues, validates the schema with Pydantic, and runs content and business-rule checks before accepting the bundle.
+1. **Stage 1: Research adapter**
+   The system runs `candidate_public_profile_lookup` and normalizes public evidence into a structured research package. This stage is deterministic and is not a Claude enrichment pass.
+2. **Stage 2: Claude reasoning + formatting**
+   Claude receives the candidate input, `research_package`, role spec, and strict output rules, then writes a single candidate JSON object. It is instructed to treat `verified`, `strongly_inferred`, and `uncertain` claims differently, and to say explicitly when a point cannot be verified from public sources.
+3. **Stage 3: Boundary-aware QA**
+   The system validates the schema and checks whether the final writing stays within source, claim, and confidence boundaries before accepting the bundle.
 
-This makes the output more robust, auditable, and recruiter-usable.
+This makes the output more robust, auditable, recruiter-usable, and safer for submission.
 
-## Tool Design
+## Research Package Design
 
-Implemented tool:
+The Stage 1 output is an explicit research package rather than a loose prose enrichment blob.
+
+Core layers:
+
+- `sources`: normalized public lookup sources
+- `claims`: recruiter-relevant statements with verification status and confidence
+- `verification`: summary of evidence completeness and unresolved gaps
+
+Each claim carries output-boundary metadata:
+
+- `verification_status`: `verified`, `strongly_inferred`, or `uncertain`
+- `confidence`: `high`, `medium`, or `low`
+- `supports_output_fields`: which recruiter-facing fields that claim is allowed to support
+
+Compatibility helpers such as `inferred_tenure_years` and `firm_aum_context` still exist on the enrichment object, but they are now derived from the structured claim set rather than stored as freeform top-level fields.
+
+Implemented research adapter:
 
 - `candidate_public_profile_lookup`
 
@@ -109,23 +181,25 @@ Input:
 
 Output:
 
-- verified public snippets
-- inferred tenure clues
-- likely channel / experience evidence
-- firm / AUM context clues
-- missing / uncertain fields
-- source list
-- confidence notes
+- source records
+- structured research claims
+- verification summary
+- derived tenure and firm-context helpers for downstream compatibility
 
 Current mode:
 
-- The tool is implemented as a fixture-backed public-research runner using `data/ppp/research_fixtures.json`.
-- This keeps the interface realistic while preventing unsupported claims in an environment where live public-web verification is not always available.
-- The code is intentionally structured so the fixture-backed runner can be replaced by a live web research connector later without rewriting the rest of the pipeline.
+- `fixture`: uses `data/ppp/research_fixtures.json` only.
+- `live`: uses a real public-web research connector and requires `TAVILY_API_KEY`.
+- `auto`: tries live public-web research first, then falls back to fixtures if the provider is unavailable or returns no usable evidence.
+- This keeps the interface realistic while preserving a conservative fallback path when live public-web verification is unavailable.
+
+Current live provider:
+
+- Tavily
 
 ## Validation And QA
 
-This submission does more than generate JSON. It checks whether the output looks safe and usable for an actual recruiter workflow.
+This submission does more than generate JSON. It checks whether the output is structurally correct and whether the writing stays inside the evidence the system actually collected.
 
 Checks include:
 
@@ -138,20 +212,46 @@ Checks include:
 - evidence-aware `role_fit.justification`
 - cautious AUM and tenure language
 - uncertainty signalling when evidence is incomplete
+- explicit “unable to verify” style wording for unverifiable firm context and other bounded inferences
+- field-level claim boundary checks against the research package
+
+In practice, this means `output.json` is treated as the final deliverable, not as a preview artifact. If the generated writing overclaims beyond verified or supportable evidence, QA should fail loudly rather than quietly letting the JSON pass.
+
+## Manual Review With Streamlit
+
+For the current architecture, manual review is not just a UI check. It is a boundary check.
+
+Recommended review flow for `data/ppp/candidates_realistic_public.csv`:
+
+1. Launch Streamlit with `streamlit run app/ui/ppp_task_app.py`.
+2. Set `Candidate CSV` to `data/ppp/candidates_realistic_public.csv`.
+3. Set `Research Mode` to `auto` unless you specifically want to force live-only behavior.
+4. Set `Intermediate Directory` to `data/ppp/intermediate_realistic_public`.
+5. Run the task, then immediately run **Validate Existing Output**.
+6. Confirm `qa_report.json` shows `passed: true` before treating the bundle as usable.
+
+What to inspect manually:
+
+- `output.json` should read like confident recruiter prose without sounding more certain than the evidence supports.
+- `firm_aum_context` should avoid precise AUM statements unless the intermediate research package contains a verified supporting claim, and should say explicitly when exact AUM cannot be verified from public sources.
+- `current_role.tenure_years` should align with the tenure claim in the enrichment artifact, or the prose should signal uncertainty.
+- `mobility_signal.rationale` should separate observed chronology from absent move-readiness evidence and should end in a clear uncertainty or follow-up cue.
+- `role_fit.justification` should be anchored to employer, title, channel exposure, or other supported claims rather than generic recruiter inference, and should distinguish supported relevance from unverified requirement coverage.
+- If a candidate fails QA, treat that as a Stage 2 wording-calibration issue first, not a reason to weaken QA.
 
 ## Known Limitations
 
-- The enrichment tool currently uses controlled fixtures rather than a live public-web connector.
-- LinkedIn URLs in the PPP brief are placeholders, so final public-profile verification still needs to happen against real sources.
-- Source citation is captured in enrichment artifacts, but not yet surfaced directly in the final `output.json` schema.
+- Source citation is captured in intermediate research artifacts, but not surfaced directly in the final `output.json` schema.
+- Stage 2 can still occasionally compress uncertainty too aggressively, especially around firm context or business-sensitive fields, even though the current prompt and stabilizers now push much harder toward explicit “unable to verify” wording.
+- The current QA boundary checks are materially better than before, but some support checks are still heuristic rather than fully semantic.
 - Confidence logic is rule-based and conservative rather than statistically calibrated.
 
 ## What I Would Build Next For PPP
 
-- A live public research connector that searches company pages, bios, and public profiles with source capture.
+- Stronger Stage 2 wording calibration so final prose stays closer to claim and confidence boundaries.
+- More semantic field-specific QA for `firm_aum_context`, `mobility_signal.rationale`, and `role_fit.justification`.
 - A citation-aware recruiter view that shows which sentence in the briefing is supported by which source.
 - A reviewer feedback loop so consultants can mark a briefing as accurate, weak, or misleading and improve future generations.
-- A candidate brief QA + outreach prioritisation layer that ranks who should actually be called first based on fit, evidence confidence, and mobility.
 
 ## Existing Background
 
