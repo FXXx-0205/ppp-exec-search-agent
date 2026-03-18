@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,6 +11,30 @@ import httpx
 
 if TYPE_CHECKING:
     from app.ppp.enrichment import CandidatePublicProfileLookupInput
+
+logger = logging.getLogger(__name__)
+
+AUM_SCALED_VALUE_PATTERN = re.compile(
+    r"(?i)(?:A\$|AUD|USD|\$|£|€)?\s*\d+(?:\.\d+)?\s*(?:B|M|bn|mn|billion|million|trillion)\b"
+)
+AUM_LARGE_AMOUNT_PATTERN = re.compile(
+    r"(?i)(?:A\$|AUD|USD|\$|£|€)\s*\d{1,3}(?:,\d{3}){2,}(?:\.\d+)?\b"
+)
+COMPANY_SUFFIX_PATTERN = re.compile(
+    r"(?i)\b(?:group|company|co|ltd|limited|pty|inc|llc|holdings?)\b|&\s*(?:co|company)\b"
+)
+NEGATIVE_CONTEXT_WORDS = [
+    "former",
+    "previously",
+    "prior",
+    "worked at",
+    "acquired",
+    "subsidiary",
+    "merger",
+    "competitor",
+]
+GLOBAL_AUM_ALLOWLIST = {"blackrock", "vanguard"}
+YEAR_CONTEXT_WORDS = ("founded", "since", "established", "in", "year")
 
 
 class ResearchClientError(Exception):
@@ -77,7 +102,41 @@ class TavilyResearchClient:
         self.client = client or httpx.Client(timeout=timeout_seconds)
 
     def lookup_candidate(self, tool_input: CandidatePublicProfileLookupInput) -> ResearchPayload:
-        query = self._build_query(tool_input)
+        try:
+            candidate_query = self._build_candidate_query(tool_input)
+            firm_query = self._build_firm_query(tool_input)
+            logger.info("Tavily candidate query for %s: %s", tool_input.full_name, candidate_query)
+            logger.info("Tavily firm query for %s: %s", tool_input.current_employer, firm_query)
+
+            candidate_payload = self._run_search(candidate_query)
+        except httpx.HTTPError as exc:
+            raise ResearchClientError(f"Tavily lookup failed: {exc}") from exc
+
+        raw_results = candidate_payload.get("results", [])
+        if not isinstance(raw_results, list):
+            raise ResearchClientError("Tavily returned no usable public-web results.")
+
+        candidate_results = self._filter_candidate_results(tool_input, raw_results)
+        identity_resolution = self._assess_identity_resolution(tool_input, raw_results)
+
+        firm_results: list[dict[str, object]] = []
+        try:
+            firm_payload = self._run_search(firm_query)
+            raw_firm_results = firm_payload.get("results", [])
+            if isinstance(raw_firm_results, list) and raw_firm_results:
+                firm_results = self._filter_firm_results(tool_input.current_employer, raw_firm_results)
+        except ResearchClientError as exc:
+            logger.warning("Tavily firm-context query failed for %s: %s", tool_input.current_employer, exc)
+
+        fixture = self._results_to_fixture(
+            tool_input,
+            candidate_results,
+            firm_results=firm_results,
+            identity_resolution=identity_resolution,
+        )
+        return ResearchPayload(mode="live_web_tavily", fixture=fixture)
+
+    def _run_search(self, query: str) -> dict[str, object]:
         try:
             response = self.client.post(
                 "https://api.tavily.com/search",
@@ -95,28 +154,31 @@ class TavilyResearchClient:
             raise ResearchClientError(f"Tavily lookup failed: {exc}") from exc
 
         payload = response.json()
-        raw_results = payload.get("results", [])
-        if not isinstance(raw_results, list) or not raw_results:
-            raise ResearchClientError("Tavily returned no usable public-web results.")
+        if not isinstance(payload, dict):
+            raise ResearchClientError("Tavily returned an invalid payload.")
+        return payload
 
-        filtered_results = self._filter_results(tool_input, raw_results)
-        if not filtered_results:
-            raise ResearchClientError("Tavily returned results, but none passed relevance and source-quality filters.")
-
-        fixture = self._results_to_fixture(tool_input, filtered_results)
-        return ResearchPayload(mode="live_web_tavily", fixture=fixture)
-
-    def _build_query(self, tool_input: CandidatePublicProfileLookupInput) -> str:
+    def _build_candidate_query(self, tool_input: CandidatePublicProfileLookupInput) -> str:
         return " ".join(
             [
                 f'"{tool_input.full_name}"',
                 f'"{tool_input.current_employer}"',
                 f'"{tool_input.current_title}"',
-                "Australia asset management wealth distribution executive biography leadership profile",
+                "LinkedIn Australia asset management wealth distribution executive biography leadership profile",
             ]
         )
 
-    def _filter_results(
+    def _build_firm_query(self, tool_input: CandidatePublicProfileLookupInput) -> str:
+        return " ".join(
+            [
+                f'"{tool_input.current_employer}"',
+                '"assets under management"',
+                '"total AUM"',
+                "Australia asset manager funds management",
+            ]
+        )
+
+    def _filter_candidate_results(
         self,
         tool_input: CandidatePublicProfileLookupInput,
         results: list[object],
@@ -126,6 +188,20 @@ class TavilyResearchClient:
             if not isinstance(item, dict):
                 continue
             score = self._score_result(tool_input, item)
+            if score < 4:
+                continue
+            scored_results.append((score, item))
+
+        scored_results.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in scored_results[: self.max_results]]
+
+    def _filter_firm_results(self, employer: str, results: list[object]) -> list[dict[str, object]]:
+        scored_results: list[tuple[int, dict[str, object]]] = []
+        employer_tokens = {token for token in re.findall(r"[a-zA-Z]{3,}", employer.lower())}
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            score = self._score_firm_result(employer, employer_tokens, item)
             if score < 4:
                 continue
             scored_results.append((score, item))
@@ -175,12 +251,44 @@ class TavilyResearchClient:
             score += 1
         return score
 
+    def _score_firm_result(self, employer: str, employer_tokens: set[str], result: dict[str, object]) -> int:
+        title = str(result.get("title", "")).strip()
+        content = str(result.get("content", "")).strip()
+        url = str(result.get("url", "")).strip()
+        if not url:
+            return -10
+
+        host = self._hostname(url)
+        if any(pattern in host for pattern in self.EXCLUDED_HOST_PATTERNS):
+            return -10
+
+        combined_text = f"{title} {content}".strip()
+        combined = combined_text.lower()
+        matched_tokens = [token for token in employer_tokens if token in combined]
+        if not matched_tokens:
+            return -5
+
+        score = len(matched_tokens) * 2
+        if any(term in combined for term in ("aum", "assets under management", "funds under management")):
+            score += 5
+        if self._contains_numeric_aum(combined_text):
+            score += 5
+        if "australia" in combined:
+            score += 1
+        if any(pattern in host for pattern in self.PREFERRED_HOST_PATTERNS):
+            score += 3
+        return score
+
     def _results_to_fixture(
         self,
         tool_input: CandidatePublicProfileLookupInput,
         results: Sequence[object],
+        *,
+        firm_results: Sequence[object],
+        identity_resolution: dict[str, object],
     ) -> dict[str, object]:
         snippets: list[str] = []
+        firm_snippets: list[str] = []
         sources: list[dict[str, object]] = []
         evidence: list[dict[str, object]] = []
         seen_urls: set[str] = set()
@@ -216,23 +324,82 @@ class TavilyResearchClient:
                     }
                 )
 
+        for item in firm_results:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title", "")).strip()
+            url = str(item.get("url", "")).strip()
+            content = str(item.get("content", "")).strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            snippet = self._compose_snippet(title=title, content=content)
+            if snippet:
+                firm_snippets.append(snippet)
+            sources.append(
+                {
+                    "label": title or url,
+                    "source_type": self._source_type(url),
+                    "url": url,
+                    "confidence": self._source_confidence(url),
+                    "trust_score": self.SOURCE_PRIORITY.get(self._source_type(url), 0.4),
+                }
+            )
+            if snippet:
+                evidence.append(
+                    {
+                        "category": "firm_context",
+                        "signal": "public_web_search_firm_context",
+                        "snippet": snippet,
+                        "source_labels": [title or url],
+                    }
+                )
+
+        status = str(identity_resolution.get("status", "not_verified"))
+        rationale = str(identity_resolution.get("rationale", "")).strip()
+        matched_source_labels = [
+            str(label).strip()
+            for label in identity_resolution.get("matched_source_labels", [])
+            if str(label).strip()
+        ]
+        possible_snippets = [
+            str(snippet).strip()
+            for snippet in identity_resolution.get("possible_public_snippets", [])
+            if str(snippet).strip()
+        ]
+        if not snippets and possible_snippets:
+            snippets = possible_snippets[:2]
         if not snippets:
-            raise ResearchClientError("Public-web results did not contain usable snippets.")
+            snippets = [
+                f"Public search did not verify an exact-match profile for {tool_input.full_name} at {tool_input.current_employer}."
+            ]
 
         inferred_tenure_years = self._infer_tenure_years(snippets)
-        firm_aum_context = self._extract_firm_aum_context(tool_input.current_employer, snippets)
+        firm_aum_context = self._extract_firm_aum_context(tool_input.current_employer, firm_snippets or snippets)
         likely_channel_evidence = self._collect_channel_evidence(tool_input.current_title, snippets)
-        likely_experience_evidence = self._collect_experience_evidence(tool_input.current_employer, snippets)
-        uncertain_fields = self._derive_uncertain_fields(snippets, inferred_tenure_years, firm_aum_context)
+        likely_experience_evidence = self._collect_experience_evidence(tool_input.current_employer, snippets + firm_snippets)
+        uncertain_fields = self._derive_uncertain_fields(snippets + firm_snippets, inferred_tenure_years, firm_aum_context)
+        combined_context = self._assemble_context(snippets, firm_snippets)
         confidence_notes = [
+            rationale or f"Identity resolution for {tool_input.full_name} remains incomplete from public-web search.",
             f"Live public-web research was attempted through Tavily for {tool_input.full_name}.",
+            f"Candidate profile query: {self._build_candidate_query(tool_input)}",
+            f"Firm context query: {self._build_firm_query(tool_input)}",
             "Only publicly available snippets were captured, so chronology and coverage scope may still require manual verification.",
+            self._build_trajectory_hint(tool_input, inferred_tenure_years),
         ]
+        if not firm_snippets:
+            confidence_notes.append("Firm context search did not return a usable AUM snippet, so company-scale evidence remains limited.")
 
         return {
-            "verified_public_snippets": snippets[:3],
+            "identity_resolution_status": status,
+            "identity_resolution_rationale": rationale,
+            "identity_resolution_source_labels": matched_source_labels,
+            "verified_public_snippets": snippets[:3] if status == "verified_match" else [],
+            "possible_public_snippets": possible_snippets[:3] if status != "verified_match" else [],
             "tenure_years": inferred_tenure_years,
             "tenure_rationale": self._build_tenure_rationale(inferred_tenure_years),
+            "trajectory_hint": self._build_trajectory_hint(tool_input, inferred_tenure_years),
             "firm_aum_context": firm_aum_context,
             "likely_channel_evidence": likely_channel_evidence,
             "likely_experience_evidence": likely_experience_evidence,
@@ -248,12 +415,105 @@ class TavilyResearchClient:
             "confidence_notes": confidence_notes,
             "sources": sources,
             "evidence": evidence[:5],
+            "combined_context": combined_context,
         }
+
+    def _assemble_context(self, candidate_snippets: list[str], firm_snippets: list[str]) -> str:
+        candidate_block = "\n".join(candidate_snippets[:2]).strip() or "No candidate profile context found."
+        firm_block = "\n".join(firm_snippets[:2]).strip() or "No specific firm context found."
+        return (
+            "=== CANDIDATE PROFILE ===\n"
+            f"{candidate_block}\n\n"
+            "=== FIRM CONTEXT & AUM ===\n"
+            f"{firm_block}"
+        )
 
     def _compose_snippet(self, *, title: str, content: str) -> str:
         text = " ".join(part for part in [title, content] if part).strip()
         text = re.sub(r"\s+", " ", text)
         return text[:320].strip()
+
+    def _assess_identity_resolution(
+        self,
+        tool_input: CandidatePublicProfileLookupInput,
+        results: Sequence[object],
+    ) -> dict[str, object]:
+        analyses: list[dict[str, object]] = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            analysis = self._analyze_candidate_result(tool_input, item)
+            if analysis["exact_name"]:
+                analyses.append(analysis)
+
+        analyses.sort(key=lambda item: int(item["score"]), reverse=True)
+
+        verified = [
+            item
+            for item in analyses
+            if item["employer_match"] and (item["title_match"] or item["linkedin_match"] or item["high_confidence_source"])
+        ]
+        if verified:
+            top = verified[0]
+            return {
+                "status": "verified_match",
+                "rationale": (
+                    f"Public search found a verified match for {tool_input.full_name} at {tool_input.current_employer}, "
+                    f"supported by {top['source_label']}."
+                ),
+                "matched_source_labels": [str(top["source_label"])],
+                "possible_public_snippets": [str(top["snippet"])],
+            }
+
+        possible = [item for item in analyses if item["employer_match"] or item["title_match"]]
+        if possible:
+            top = possible[0]
+            return {
+                "status": "possible_match",
+                "rationale": (
+                    f"Public search surfaced a possible match for {tool_input.full_name}, but the exact identity at "
+                    f"{tool_input.current_employer} remains unconfirmed."
+                ),
+                "matched_source_labels": [str(top["source_label"])],
+                "possible_public_snippets": [str(item["snippet"]) for item in possible[:2] if str(item["snippet"]).strip()],
+            }
+
+        return {
+            "status": "not_verified",
+            "rationale": (
+                f"Public search did not verify an exact-match profile for {tool_input.full_name} at {tool_input.current_employer}; "
+                "the task input should therefore be treated as unverified."
+            ),
+            "matched_source_labels": [],
+            "possible_public_snippets": [],
+        }
+
+    def _analyze_candidate_result(
+        self,
+        tool_input: CandidatePublicProfileLookupInput,
+        result: dict[str, object],
+    ) -> dict[str, object]:
+        title = str(result.get("title", "")).strip()
+        content = str(result.get("content", "")).strip()
+        url = str(result.get("url", "")).strip()
+        combined_text = f"{title} {content}".strip()
+        combined = combined_text.lower()
+        source_type = self._source_type(url)
+        exact_name = tool_input.full_name.lower() in combined
+        employer_match = tool_input.current_employer.lower() in combined
+        title_match = any(token in combined for token in self._significant_title_tokens(tool_input.current_title))
+        linkedin_match = self._linkedin_identity_match(tool_input.linkedin_url, url)
+        score = self._score_result(tool_input, result)
+        return {
+            "exact_name": exact_name,
+            "employer_match": employer_match,
+            "title_match": title_match,
+            "linkedin_match": linkedin_match,
+            "high_confidence_source": source_type in {"linkedin_public", "company_site", "regulatory_public", "industry_biography"},
+            "score": score,
+            "source_label": title or url,
+            "snippet": self._compose_snippet(title=title, content=content),
+        }
 
     def _source_type(self, url: str) -> str:
         host = self._hostname(url)
@@ -295,7 +555,7 @@ class TavilyResearchClient:
 
     def _classify_category(self, snippet: str) -> str:
         lowered = snippet.lower()
-        if any(token in lowered for token in ("aum", "assets under management", "$", "aud")):
+        if any(token in lowered for token in ("aum", "assets under management", "funds under management")) or self._contains_numeric_aum(snippet):
             return "firm_context"
         if any(token in lowered for token in ("joined", "since", "appointed", "promoted")):
             return "tenure"
@@ -318,11 +578,175 @@ class TavilyResearchClient:
         return None
 
     def _extract_firm_aum_context(self, employer: str, snippets: list[str]) -> str:
+        normalized_employer = self._normalize_company_name(employer)
+        preferred_sentence: str | None = None
+        preferred_amount: str | None = None
+
+        for snippet in snippets:
+            amount, context_window = self._extract_attributed_aum(snippet, normalized_employer=normalized_employer)
+            if amount is not None:
+                preferred_sentence = self._best_firm_aum_sentence(context_window or snippet) or (context_window or snippet)
+                preferred_amount = amount
+                break
+
+        if preferred_amount is not None and preferred_sentence is not None:
+            return (
+                f"{employer} appears to be an active asset manager with an estimated AUM of {preferred_amount}, "
+                f"{self._firm_context_qualifier(preferred_sentence)}"
+            )
+
         for snippet in snippets:
             lowered = snippet.lower()
-            if "aum" in lowered or "assets under management" in lowered or re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", lowered):
+            if "aum" in lowered or "assets under management" in lowered or "funds under management" in lowered:
                 return f"{employer} appears in public-web snippets with firm-scale references, but the exact AUM figure should still be verified manually."
         return f"{employer} appears in public-web results as an established investment or wealth platform, but exact AUM still requires direct verification."
+
+    def _contains_numeric_aum(self, text: str) -> bool:
+        return bool(AUM_SCALED_VALUE_PATTERN.search(text) or AUM_LARGE_AMOUNT_PATTERN.search(text))
+
+    def _first_aum_value(self, text: str) -> str | None:
+        match = AUM_SCALED_VALUE_PATTERN.search(text) or AUM_LARGE_AMOUNT_PATTERN.search(text)
+        return match.group(0).strip() if match else None
+
+    def _normalize_company_name(self, employer: str) -> str:
+        cleaned = COMPANY_SUFFIX_PATTERN.sub(" ", employer)
+        cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned.lower()
+
+    def _extract_attributed_aum(self, text: str, *, normalized_employer: str) -> tuple[str | None, str | None]:
+        matches = list(AUM_SCALED_VALUE_PATTERN.finditer(text)) + list(AUM_LARGE_AMOUNT_PATTERN.finditer(text))
+        matches.sort(key=lambda item: item.start())
+        if not matches:
+            return None, None
+
+        normalized_text = self._normalize_company_name(text)
+        lowered_text = text.lower()
+        for match in matches:
+            start = max(0, match.start() - 150)
+            end = min(len(text), match.end() + 150)
+            context_window = text[start:end].strip()
+            lowered_window = context_window.lower()
+            sentence = self._sentence_containing_span(text, match.start(), match.end())
+            sentence_normalized = self._normalize_company_name(sentence)
+
+            if self._is_invalid_year_match(text, match):
+                continue
+            if self._fails_aum_sanity_check(match.group(0), normalized_employer=normalized_employer):
+                continue
+            if any(word in lowered_window for word in NEGATIVE_CONTEXT_WORDS):
+                continue
+            if normalized_employer and normalized_employer not in sentence_normalized:
+                if not self._employer_is_near_amount(context_window, match, offset=start, normalized_employer=normalized_employer):
+                    snippet_has_employer = normalized_employer in normalized_text
+                    snippet_has_aum_signal = any(
+                        term in lowered_text for term in ("aum", "assets under management", "funds under management")
+                    )
+                    if not (snippet_has_employer and snippet_has_aum_signal):
+                        continue
+            return match.group(0).strip(), context_window
+
+        return None, text[:300].strip() if text else None
+
+    def _best_firm_aum_sentence(self, snippet: str) -> str | None:
+        segments = [
+            segment.strip(" -:;,.")
+            for segment in re.split(r"(?<=[.!?])\s+|(?<=;)\s+", snippet)
+            if segment and segment.strip()
+        ]
+        candidates = [segment for segment in segments if self._looks_like_natural_aum_sentence(segment)]
+        if candidates:
+            candidates.sort(key=self._firm_sentence_score, reverse=True)
+            return candidates[0]
+        if self._looks_like_natural_aum_sentence(snippet):
+            return snippet.strip()
+        return None
+
+    def _looks_like_natural_aum_sentence(self, text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", text).strip()
+        lowered = normalized.lower()
+        if len(normalized) < 20:
+            return False
+        if not self._contains_numeric_aum(normalized):
+            return False
+        if not any(term in lowered for term in ("aum", "assets under management", "funds under management")):
+            return False
+        if "($b)" in lowered or "($m)" in lowered:
+            return False
+        if lowered.count("|") >= 2 or lowered.count(" --- ") >= 1:
+            return False
+        return True
+
+    def _firm_sentence_score(self, text: str) -> tuple[int, int]:
+        lowered = text.lower()
+        return (
+            int("assets under management" in lowered or "funds under management" in lowered or "aum" in lowered),
+            len(text),
+        )
+
+    def _firm_context_qualifier(self, sentence: str) -> str:
+        lowered = sentence.lower()
+        if any(term in lowered for term in ("acquisition", "acquired", "merger", "group fum", "transaction")):
+            return "based on transaction-related public references and still subject to verification."
+        if any(term in lowered for term in ("13f", "sec", "crd #", "cik #", "employees |", "aum ($b)")):
+            return "based on regulatory and public-web references and still subject to verification."
+        return "based on recent public-web references and still subject to verification."
+
+    def _sentence_containing_span(self, text: str, start: int, end: int) -> str:
+        left = max(text.rfind(".", 0, start), text.rfind("!", 0, start), text.rfind("?", 0, start))
+        right_candidates = [idx for idx in (text.find(".", end), text.find("!", end), text.find("?", end)) if idx != -1]
+        right = min(right_candidates) if right_candidates else len(text)
+        sentence = text[left + 1 : right].strip()
+        return sentence or text.strip()
+
+    def _employer_is_near_amount(self, context_window: str, match: re.Match[str], *, offset: int, normalized_employer: str) -> bool:
+        if not normalized_employer:
+            return True
+        employer_pattern = re.compile(r"\b" + r"\W+".join(re.escape(part) for part in normalized_employer.split()) + r"\b", re.IGNORECASE)
+        local_match_start = match.start() - offset
+        for employer_match in employer_pattern.finditer(context_window):
+            distance = min(abs(local_match_start - employer_match.end()), abs(match.end() - offset - employer_match.start()))
+            if distance <= 40:
+                return True
+        return False
+
+    def _is_invalid_year_match(self, text: str, match: re.Match[str]) -> bool:
+        amount = match.group(0)
+        numeric_value, _ = self._parse_aum_amount(amount)
+        if numeric_value is None or not (1990 <= numeric_value <= 2026):
+            return False
+        local_start = max(0, match.start() - 10)
+        local_end = min(len(text), match.end() + 10)
+        nearby = text[local_start:local_end].lower()
+        return any(re.search(rf"\b{re.escape(word)}\b", nearby) for word in YEAR_CONTEXT_WORDS)
+
+    def _fails_aum_sanity_check(self, amount: str, *, normalized_employer: str) -> bool:
+        numeric_value, unit = self._parse_aum_amount(amount)
+        if numeric_value is None or unit is None:
+            return False
+        if unit == "billion" and numeric_value > 1000 and normalized_employer not in GLOBAL_AUM_ALLOWLIST:
+            return True
+        return False
+
+    def _parse_aum_amount(self, amount: str) -> tuple[float | None, str | None]:
+        cleaned = amount.strip().lower().replace(",", "")
+        match = re.search(
+            r"(?i)(?:a\$|aud|usd|\$|£|€)?\s*(\d+(?:\.\d+)?)\s*(b|m|bn|mn|billion|million|trillion)?\b",
+            cleaned,
+        )
+        if match is None:
+            return None, None
+        value = float(match.group(1))
+        unit = (match.group(2) or "").lower()
+        if unit in {"b", "bn", "billion"}:
+            return value, "billion"
+        if unit in {"m", "mn", "million"}:
+            return value, "million"
+        if unit == "trillion":
+            return value, "trillion"
+        if "," in amount:
+            return value, "raw_currency"
+        return value, None
 
     def _collect_channel_evidence(self, current_title: str, snippets: list[str]) -> list[str]:
         channel_terms = ("distribution", "wholesale", "institutional", "adviser", "consultant", "sales")
@@ -356,6 +780,16 @@ class TavilyResearchClient:
         if inferred_tenure_years is None:
             return "Exact current-role tenure could not be verified from public-web snippets and remains a manual follow-up item."
         return f"Estimated at approximately {inferred_tenure_years:.1f} years based on dated public-web snippets; this should still be checked manually."
+
+    def _build_trajectory_hint(self, tool_input: CandidatePublicProfileLookupInput, inferred_tenure_years: float | None) -> str:
+        title = tool_input.current_title.lower()
+        if inferred_tenure_years is not None:
+            return f"Public chronology suggests an established current-role tenure of about {inferred_tenure_years:.1f} years for the visible remit."
+        if "head" in title or "director" in title:
+            return "Public chronology is incomplete, but the visible role shape suggests an already-scaled senior remit rather than a brand-new step-up."
+        if "bdm" in title or "sales" in title:
+            return "Public chronology is incomplete, though the visible role shape suggests hands-on channel ownership rather than purely strategic oversight."
+        return "Public chronology is incomplete and trajectory should be treated cautiously until a fuller public timeline is verified."
 
     def _hostname(self, url: str) -> str:
         return urlparse(url).netloc.lower()

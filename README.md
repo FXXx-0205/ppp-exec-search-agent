@@ -39,10 +39,10 @@ export PPP_RESEARCH_MODE=auto
 export TAVILY_API_KEY=your_tavily_key_here
 ```
 
-For the realistic public-data rerun used during manual review:
+For the new non-technical PPP briefing UI:
 
 ```bash
-streamlit run app/ui/ppp_task_app.py
+streamlit run streamlit_app.py
 ```
 
 ## Example Command
@@ -71,37 +71,98 @@ python3 scripts/run_ppp_task.py \
   --model claude-sonnet-4-5
 ```
 
-Optional non-technical runner:
+## Streamlit UI Usage
+
+`streamlit_app.py` is a direct UI wrapper around the existing PPP pipeline.
+
+Important:
+
+- You do **not** need to start the FastAPI backend before running `streamlit_app.py`.
+- The Streamlit page imports and calls `app.ppp.run_ppp_pipeline(...)` directly inside the same Python process.
+- Only start the backend separately if you want to use the repository's API routes for other workflows. It is not required for the PPP briefing UI.
+
+### 1. Install dependencies
 
 ```bash
-streamlit run app/ui/ppp_task_app.py
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Streamlit runner flow:
+### 2. Launch the Streamlit app
 
-1. Start the app with the command above.
-2. In **Step 1: Configure Inputs**, set:
-   - `Candidate CSV`: `data/ppp/candidates_realistic_public.csv`
-   - `Research Mode`: `auto` or `live`
-   - `Intermediate Directory`: `data/ppp/intermediate_realistic_public`
-3. Keep the default role spec, output path, and fixtures unless you are intentionally testing alternates.
-4. Review the **Current Paths** block so you can see exactly which files will be read and written.
-5. Click **Run PPP Task**.
-6. Wait for the app to generate:
-   - `data/ppp/output.json`
-   - `data/ppp/intermediate_realistic_public/candidate_*_enriched.json`
-   - `data/ppp/intermediate_realistic_public/qa_report.json`
-7. Review the **Output Preview** in the app.
-8. Click **Validate Existing Output** to rerun validation without regenerating the briefings.
-9. Review the **QA Report** section in the app and confirm it passes before submission.
+From the repository root:
 
-What a non-technical reviewer should expect to see:
+```bash
+streamlit run streamlit_app.py
+```
 
-- one button to generate the deliverable
-- one button to validate the latest deliverable
-- a preview of the final JSON
-- a preview of the QA report
-- no need to edit Python files or use the terminal after Streamlit is running
+After startup, Streamlit will print a local URL such as `http://localhost:8501`. Open that URL in your browser.
+
+### 3. Prepare what you need before clicking Generate
+
+- An Anthropic API key
+- A candidate CSV file in PPP format
+- Exactly 5 candidate rows
+
+Required CSV columns:
+
+- `full_name`
+- `current_employer`
+- `current_title`
+- `linkedin_url`
+
+### 4. Use the UI
+
+1. Open the app in the browser.
+2. In the left sidebar, enter your Anthropic API key in **Anthropic API Key**.
+3. In the main area, upload the PPP candidate CSV with **Upload candidate CSV**.
+4. Click **🚀 Generate Briefings**.
+5. Wait while the existing pipeline runs. The page will show a loading spinner during processing.
+6. Review the generated candidate briefings:
+   - each candidate appears in an expandable panel
+   - the panel title shows `full_name - current_role.title @ current_role.employer`
+   - the top row shows `Role Fit Score` and `Mobility Score`
+   - the highlighted box shows the recruiter-ready `outreach_hook`
+   - the narrative, fit justification, tags, AUM context, and tenure note appear below
+7. Click **Download output.json** at the bottom to save the generated result bundle.
+
+### 5. What the app does behind the scenes
+
+When you click **Generate Briefings**, the UI:
+
+1. saves the uploaded CSV to a temporary file
+2. injects the sidebar API key into the current process environment
+3. calls the existing PPP pipeline directly:
+
+```python
+run_ppp_pipeline(
+    input_path=...,
+    output_path=...,
+    role_spec_path="data/ppp/role_spec.json",
+    model="claude-sonnet-4-5",
+    intermediate_dir=...,
+    research_fixture_path="data/ppp/research_fixtures.json",
+    research_mode="fixture",
+)
+```
+
+4. renders the returned JSON in a recruiter-friendly layout
+
+No PPP pipeline business logic is reimplemented in the Streamlit layer.
+
+### 6. Common troubleshooting
+
+- `ANTHROPIC_API_KEY is missing`
+  Enter the API key in the Streamlit sidebar, then click generate again.
+- `CSV format error: missing required columns`
+  Check that the uploaded CSV contains all four required header names exactly.
+- `Candidate count error: expected 5 candidates`
+  The PPP pipeline only accepts CSV files with exactly 5 rows.
+- The app opens but generation fails
+  Make sure your virtual environment is activated and dependencies from `requirements.txt` are installed.
+- You are wondering whether to run `uvicorn` or `python app/main.py`
+  You do not need either of those for `streamlit_app.py`.
 
 Pre-submission validation:
 
@@ -112,6 +173,31 @@ python3 scripts/run_ppp_task.py \
   --intermediate-dir data/ppp/intermediate \
   --validate-only
 ```
+
+## How Uncertainty Is Handled
+
+The PPP task explicitly allows partial, noisy, or illustrative candidate inputs. This implementation therefore treats uncertainty as a first-class product feature rather than as an exception path.
+
+The pipeline uses three identity states internally:
+
+- `verified_match`: public evidence supports an exact or near-exact profile match
+- `possible_match`: public evidence is directionally consistent, but identity still needs confirmation
+- `not_verified`: the task input remains commercially plausible, but public evidence does not yet support treating it as an action-ready target
+
+Those states do not change the required output schema, but they do change how the system writes and scores each candidate:
+
+- verified profiles can be presented more directly
+- possible matches can still score meaningfully when the commercial fit is strong, but the wording stays caveated
+- not verified profiles are kept low-scoring and framed as market-map inputs rather than confirmed outreach targets
+
+Field-specific downgrade rules keep the output submission-safe:
+
+- `firm_aum_context` uses numeric AUM only when it is explicitly framed as estimated and based on public references
+- `mobility_signal` separates visible chronology from missing move-readiness evidence
+- `role_fit.justification` distinguishes commercial relevance from verification confidence
+- `outreach_hook` shifts tone from direct to exploratory to light-touch depending on evidence quality
+
+Outputs explicitly prefer phrases such as `unable to verify`, `appears to`, `based on public evidence`, and `subject to verification`.
 
 ## Output Format
 
@@ -124,6 +210,7 @@ Intermediate artifacts:
 - `data/ppp/intermediate/candidate_1_enriched.json` to `candidate_5_enriched.json`
 - `data/ppp/intermediate/qa_report.json`
 - `data/ppp/intermediate/candidate_*_error.json` on candidate-level failure
+- `data/ppp/intermediate/run_report.json` with delivery status, identity resolution, verification posture, and inclusion reasoning
 
 The final JSON contains:
 
@@ -223,12 +310,13 @@ For the current architecture, manual review is not just a UI check. It is a boun
 
 Recommended review flow for `data/ppp/candidates_realistic_public.csv`:
 
-1. Launch Streamlit with `streamlit run app/ui/ppp_task_app.py`.
-2. Set `Candidate CSV` to `data/ppp/candidates_realistic_public.csv`.
-3. Set `Research Mode` to `auto` unless you specifically want to force live-only behavior.
-4. Set `Intermediate Directory` to `data/ppp/intermediate_realistic_public`.
-5. Run the task, then immediately run **Validate Existing Output**.
-6. Confirm `qa_report.json` shows `passed: true` before treating the bundle as usable.
+1. Launch the legacy reviewer with `streamlit run app/ui/ppp_task_app.py` if you want the older validation-oriented control panel.
+2. For the new non-technical briefing experience, launch `streamlit run streamlit_app.py`.
+3. If you use the legacy reviewer, set `Candidate CSV` to `data/ppp/candidates_realistic_public.csv`.
+4. Set `Research Mode` to `auto` unless you specifically want to force live-only behavior.
+5. Set `Intermediate Directory` to `data/ppp/intermediate_realistic_public`.
+6. Run the task, then immediately run **Validate Existing Output**.
+7. Confirm `qa_report.json` shows `passed: true` before treating the bundle as usable.
 
 What to inspect manually:
 

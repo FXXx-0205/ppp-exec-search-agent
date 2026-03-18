@@ -95,7 +95,7 @@ def main() -> int:
             logging.info("PPP output validation passed. Report: %s", report_path)
             return 0
 
-        run_ppp_pipeline(
+        result = run_ppp_pipeline(
             input_path=input_path,
             output_path=args.output_path,
             role_spec_path=args.role_spec_path,
@@ -111,7 +111,15 @@ def main() -> int:
         logging.exception("PPP task run failed unexpectedly.")
         return 1
 
-    logging.info("PPP task completed successfully.")
+    if result.delivery_status == "success":
+        logging.info("PPP task completed successfully with %s/5 candidates.", result.successful_candidate_count)
+    else:
+        logging.warning(
+            "PPP task completed with partial success: %s succeeded, %s failed. Review %s",
+            result.successful_candidate_count,
+            result.failed_candidate_count,
+            result.run_report_path,
+        )
     return 0
 
 

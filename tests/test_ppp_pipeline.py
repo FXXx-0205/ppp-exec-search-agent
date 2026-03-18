@@ -8,11 +8,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.ppp.enrichment import CandidatePublicProfileLookupInput, CandidatePublicProfileLookupTool
-from app.ppp.pipeline import PPPTaskError, _load_candidates_csv, _load_role_spec, _stabilize_candidate_brief, run_ppp_pipeline
+from app.ppp.pipeline import PPPTaskError, _load_candidates_csv, _load_role_spec, _resolve_research_mode, _stabilize_candidate_brief, run_ppp_pipeline
 from app.ppp.qa import run_bundle_qa, validate_output_bundle
 from app.ppp.research import ResearchClientError, TavilyResearchClient
+from app.ppp.role_spec import load_role_spec_json_text, normalize_role_spec, parse_role_spec_text
 from app.ppp.schema import validate_output_document
 from app.ppp.validator import validate_and_repair_candidate_payload
+from app.ppp.enrichment import _firm_context_status
 
 
 def _candidate_from_prompt(payload: dict[str, object]) -> dict[str, str]:
@@ -145,6 +147,67 @@ def test_load_role_spec_requires_object_json(tmp_path) -> None:
         _load_role_spec(path)
 
 
+def test_load_role_spec_normalizes_parser_style_payload(tmp_path) -> None:
+    path = tmp_path / "role.json"
+    path.write_text(
+        json.dumps(
+            {
+                "title": "Head of Distribution / National BDM",
+                "required_skills": ["Institutional sales", "Platform relationships"],
+                "sector": "Funds Management",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    role_spec = _load_role_spec(path)
+    assert role_spec["role"] == "Head of Distribution / National BDM"
+    assert role_spec["requirements"] == ["Institutional sales", "Platform relationships"]
+    assert role_spec["sector"] == "Funds Management"
+
+
+def test_role_spec_helpers_normalize_and_parse_text() -> None:
+    normalized = normalize_role_spec(
+        {
+            "title": "Head of Distribution / National BDM",
+            "required_skills": ["Institutional sales", "Team leadership"],
+            "preferred_skills": ["Alternatives"],
+        }
+    )
+    assert normalized["role"] == "Head of Distribution / National BDM"
+    assert normalized["requirements"] == ["Institutional sales", "Team leadership"]
+
+    class FakeClient:
+        def generate_text(self, *, system_prompt: str, user_prompt: str, model: str, max_tokens: int, extra=None) -> str:
+            assert "structured role specification" in system_prompt
+            assert "distribution" in user_prompt.lower()
+            return json.dumps(
+                {
+                    "title": "Head of Distribution / National BDM",
+                    "seniority": "Head",
+                    "required_skills": ["Institutional sales", "Platform relationships"],
+                }
+            )
+
+    parsed = parse_role_spec_text(
+        text="Head of Distribution mandate focused on institutional sales and platform relationships.",
+        client=FakeClient(),  # type: ignore[arg-type]
+        model="claude-sonnet-4-5",
+    )
+    assert parsed["role"] == "Head of Distribution / National BDM"
+    assert parsed["requirements"] == ["Institutional sales", "Platform relationships"]
+
+    loaded = load_role_spec_json_text(json.dumps(parsed))
+    assert loaded["role"] == "Head of Distribution / National BDM"
+
+
+def test_resolve_research_mode_defaults_to_live_when_tavily_key_present(monkeypatch) -> None:
+    monkeypatch.setattr("app.ppp.pipeline.settings.tavily_api_key", "test-tavily-key")
+    monkeypatch.setattr("app.ppp.pipeline.settings.ppp_research_mode", "fixture")
+
+    assert _resolve_research_mode(None) == "live"
+
+
 def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
     input_path = tmp_path / "candidates.csv"
     input_path.write_text(
@@ -207,6 +270,7 @@ def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
         role_spec_path=str(role_spec_path),
         model="claude-sonnet-4-5",
         intermediate_dir=str(tmp_path / "intermediate"),
+        research_mode="fixture",
     )
 
     assert output_path.exists()
@@ -331,6 +395,7 @@ def test_lookup_tool_live_mode_uses_research_client(tmp_path) -> None:
                         "missing_fields": ["verified team size"],
                         "uncertain_fields": ["precise current-role tenure"],
                         "confidence_notes": ["Live public-web research succeeded."],
+                        "combined_context": "=== CANDIDATE PROFILE ===\nProfile result\n\n=== FIRM CONTEXT & AUM ===\nFirm result",
                         "sources": [
                             {
                                 "label": "Leadership page",
@@ -360,6 +425,7 @@ def test_lookup_tool_live_mode_uses_research_client(tmp_path) -> None:
 
     assert result.tool_mode == "live_web"
     assert result.claims[0].statement == "Example Candidate appears on a public leadership page."
+    assert any("=== FIRM CONTEXT & AUM ===" in note for note in result.verification.confidence_notes)
 
 
 def test_lookup_tool_auto_mode_falls_back_to_fixture_on_live_error(tmp_path) -> None:
@@ -431,6 +497,32 @@ def test_recruiter_signals_derives_channel_orientation(tmp_path, title: str, fix
 def test_recruiter_signals_derives_mandate_similarity(tmp_path, title: str, fixture: dict[str, Any], expected: str) -> None:
     enrichment = _build_enrichment(tmp_path, title=title, fixture=fixture)
     assert enrichment.recruiter_signals.mandate_similarity == expected
+
+
+def test_deliberate_bad_candidate_is_classified_as_unclear_fit(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        full_name="Daniel Koleth",
+        employer="Example Investments",
+        title="Senior Investment Analyst",
+        fixture={
+            "verified_public_snippets": ["Daniel Koleth is listed as Senior Investment Analyst at Example Investments."],
+            "likely_channel_evidence": ["Public snippets reference equities research and investment analysis rather than sales or distribution coverage."],
+            "likely_experience_evidence": ["Current remit appears research-oriented with no direct evidence of client distribution leadership."],
+            "uncertain_fields": ["direct client coverage", "distribution remit", "team leadership scale"],
+            "missing_fields": ["platform / IFA / super-fund network depth"],
+        },
+    )
+
+    assert enrichment.recruiter_signals.channel_orientation == "unclear"
+    assert enrichment.recruiter_signals.mandate_similarity == "unclear_fit"
+
+
+def test_fixture_enrichment_defaults_identity_resolution_to_verified_match(tmp_path) -> None:
+    enrichment = _build_enrichment(tmp_path, title="Head of Distribution")
+
+    assert enrichment.identity_resolution.status == "verified_match"
+    assert "public sources verify" in enrichment.identity_resolution.rationale.lower()
 
 
 def test_recruiter_signals_sell_points_and_gaps_are_claim_and_verification_backed(tmp_path) -> None:
@@ -540,6 +632,119 @@ def test_stabilized_output_differentiates_lane_scope_and_hook_across_candidates(
     assert "broader channel stretch" in institutional_brief.outreach_hook.lower()
     assert "wealth and intermediary distribution leadership" in wealth_brief.outreach_hook.lower()
     assert "step-up conversation" in wholesale_brief.outreach_hook.lower()
+
+
+def test_stabilized_output_keeps_deliberate_bad_candidate_low_confidence(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        full_name="Daniel Koleth",
+        employer="Example Investments",
+        title="Senior Investment Analyst",
+        fixture={
+            "verified_public_snippets": ["Daniel Koleth is listed as Senior Investment Analyst at Example Investments."],
+            "likely_channel_evidence": ["Public snippets reference equities research and investment analysis rather than sales or distribution coverage."],
+            "likely_experience_evidence": ["Current remit appears research-oriented with no direct evidence of client distribution leadership."],
+            "uncertain_fields": ["direct client coverage", "distribution remit", "team leadership scale"],
+            "missing_fields": ["platform / IFA / super-fund network depth"],
+        },
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Daniel Koleth is currently Senior Investment Analyst at Example Investments. "
+                "The profile appears relevant to the target mandate because of broader market exposure. "
+                "Public evidence remains incomplete."
+            ),
+            role_fit_justification=(
+                "This profile looks highly relevant to the brief because the candidate appears to have a distribution remit. "
+                "Direct evidence of team scale is unverified. "
+                "Screening priority: how broad is the remit?"
+            ),
+            outreach_hook="Hi Daniel, we're working on a distribution leadership mandate and your background looks highly relevant.",
+        )
+    )
+
+    candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
+
+    assert candidate.role_fit.score <= 3
+    assert "distribution remit" not in candidate.role_fit.justification.lower()
+    assert "relevant distribution exposure" not in candidate.role_fit.justification.lower()
+    assert "distribution leaders" not in candidate.career_narrative.lower()
+    assert "distribution leadership mandate" not in candidate.outreach_hook.lower()
+    assert "adjacent" in candidate.outreach_hook.lower() or "client-facing" in candidate.outreach_hook.lower()
+
+
+def test_stabilized_output_handles_not_verified_identity_as_unverified_market_input(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        full_name="Unverified Candidate",
+        employer="Example AM",
+        title="Head of Distribution",
+        fixture={
+            "identity_resolution_status": "not_verified",
+            "identity_resolution_rationale": "Public search did not verify an exact-match profile for Unverified Candidate at Example AM.",
+            "identity_resolution_source_labels": ["Public web search"],
+            "verified_public_snippets": [],
+            "possible_public_snippets": [],
+            "uncertain_fields": ["identity-linked chronology", "identity-specific channel history"],
+            "missing_fields": ["exact-match public identity"],
+        },
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative="Placeholder one. Placeholder two. Placeholder three.",
+            role_fit_justification="Placeholder one. Placeholder two. Placeholder three.",
+            outreach_hook="Placeholder hook.",
+        )
+    )
+
+    candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
+
+    assert candidate.role_fit.score <= 2
+    assert "did not verify an exact-match profile" in candidate.career_narrative.lower()
+    assert "unverified market input" in candidate.role_fit.justification.lower()
+    assert "could not yet verify an exact public profile" in candidate.outreach_hook.lower() or "partially verified market map" in candidate.outreach_hook.lower()
+
+
+def test_not_verified_career_narrative_still_explains_lane_relevance(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        full_name="Institutional Candidate",
+        employer="Example AM",
+        title="Director, Institutional Sales",
+        fixture={
+            "identity_resolution_status": "not_verified",
+            "identity_resolution_rationale": "Public search remained ambiguous for Institutional Candidate at Example AM.",
+            "identity_resolution_source_labels": ["Public web search"],
+            "verified_public_snippets": [],
+            "possible_public_snippets": [],
+            "channel_orientation": "institutional",
+            "scope_signal": "global",
+            "mandate_similarity": "unclear_fit",
+            "sell_points": [
+                "current remit is anchored in senior institutional coverage",
+                "public evidence points to global scope",
+            ],
+            "uncertain_fields": ["identity-linked chronology", "team leadership scale"],
+            "missing_fields": ["exact-match public identity"],
+        },
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative="Placeholder one. Placeholder two. Placeholder three.",
+            role_fit_justification="Placeholder one. Placeholder two. Placeholder three.",
+            outreach_hook="Placeholder hook.",
+        )
+    )
+
+    candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
+    lowered = candidate.career_narrative.lower()
+    assert "institutional" in lowered
+    assert "tentative market map" in lowered
+    assert "confirmed target" in lowered
 
 
 def test_recruiter_usefulness_qa_accepts_lane_relevance_boundary_structure(tmp_path) -> None:
@@ -717,6 +922,73 @@ def test_qa_flags_firm_aum_context_that_hides_unverifiable_status(tmp_path) -> N
     assert any(item.check == "firm_aum_context_uncertainty" for item in report.findings)
 
 
+def test_qa_allows_estimated_numeric_aum_with_disclaimer(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        employer="Pendal Group",
+        fixture={"firm_aum_context": "Pendal Group appears to be an active asset manager with an estimated AUM of $44.6 billion based on public references."},
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Pendal Group, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Pendal Group because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Pendal Group appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+    output.candidates[0].firm_aum_context = (
+        "Pendal Group appears to be an active asset manager with an estimated AUM of $44.6 billion based on public references."
+    )
+
+    report = run_bundle_qa(output=output, candidates={}, enrichments={"candidate_1": enrichment})
+    assert all(item.check != "firm_aum_context_uncertainty" for item in report.findings)
+    assert all(item.check != "claim_boundary_firm_aum_context" for item in report.findings)
+
+
+def test_stabilize_candidate_rewrites_numeric_aum_with_uncertainty_disclaimer(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        employer="Perpetual Limited",
+        fixture={"firm_aum_context": "Perpetual Limited reported AUM of $44.6 billion."},
+    )
+    output = validate_output_document(
+        _build_candidate_payload(
+            enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Perpetual Limited, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Perpetual Limited because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Perpetual Limited appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+
+    candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
+    lowered = candidate.firm_aum_context.lower()
+    assert "$44.6 billion" in candidate.firm_aum_context
+    assert "estimated" in lowered
+    assert "public references" in lowered
+    assert "subject to verification" in lowered
+
+
+def test_firm_context_status_treats_estimated_numeric_aum_as_strongly_inferred() -> None:
+    statement = "SG Hiscock & Company appears to be an active asset manager with an estimated AUM of $17 billion."
+    assert _firm_context_status(statement) == "strongly_inferred"
+
+
 def test_mobility_rationale_requires_chronology_uncertainty_and_follow_up(tmp_path) -> None:
     enrichment = _build_enrichment(tmp_path, fixture={"tenure_years": 2.3})
     output = validate_output_document(
@@ -738,7 +1010,34 @@ def test_mobility_rationale_requires_chronology_uncertainty_and_follow_up(tmp_pa
     candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
     assert "public chronology suggests approximately" in candidate.mobility_signal.rationale.lower()
     assert "no direct public signal of move readiness is visible" in candidate.mobility_signal.rationale.lower()
-    assert "uncertain pending conversation" in candidate.mobility_signal.rationale.lower()
+    assert "uncertain and checked in follow-up conversation" in candidate.mobility_signal.rationale.lower()
+
+
+def test_mobility_rationale_is_mode_aware_when_tenure_is_missing(tmp_path) -> None:
+    fixture_enrichment = _build_enrichment(tmp_path, fixture={})
+    live_enrichment = fixture_enrichment.model_copy(update={"tool_mode": "live_web"})
+    output = validate_output_document(
+        _build_candidate_payload(
+            fixture_enrichment,
+            career_narrative=(
+                "Example Candidate is currently Head of Distribution at Example AM, with public evidence pointing to an unclear channel lane from public evidence. "
+                "This profile looks only cautiously in frame because public evidence supports a relevant distribution remit. "
+                "Public evidence does not fully confirm broader channel depth, and channel breadth remains unclear should be confirmed in conversation."
+            ),
+            role_fit_justification=(
+                "Public evidence supports relevance from Head of Distribution at Example AM because current title already signals senior distribution ownership. "
+                "However, direct evidence of channel breadth remains unverified. "
+                "This should be tested early in screening conversation, starting with whether channel breadth matches the role scope."
+            ),
+            outreach_hook="I'm reaching out because your Head of Distribution background at Example AM appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search.",
+        )
+    )
+
+    fixture_candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=fixture_enrichment)
+    live_candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=live_enrichment)
+
+    assert "fixture-backed run did not provide public chronology for the current role" in fixture_candidate.mobility_signal.rationale.lower()
+    assert "live public-web research did not clearly establish public chronology for the current role" in live_candidate.mobility_signal.rationale.lower()
 
 
 def test_qa_flags_mobility_rationale_that_sounds_like_recruiter_intuition(tmp_path) -> None:
@@ -768,7 +1067,11 @@ def test_qa_flags_mobility_rationale_that_sounds_like_recruiter_intuition(tmp_pa
 
 
 def test_tavily_research_client_builds_fixture_from_results() -> None:
+    queries: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        queries.append(str(payload["query"]))
         return httpx.Response(
             200,
             json={
@@ -802,6 +1105,11 @@ def test_tavily_research_client_builds_fixture_from_results() -> None:
     assert payload.fixture["tenure_years"] == 2.0
     assert isinstance(payload.fixture["sources"], list)
     assert isinstance(payload.fixture["likely_channel_evidence"], list)
+    assert isinstance(payload.fixture["combined_context"], str)
+    assert "=== FIRM CONTEXT & AUM ===" in payload.fixture["combined_context"]
+    assert len(queries) == 2
+    assert "LinkedIn Australia" in queries[0]
+    assert "assets under management" in queries[1]
 
 
 def test_tavily_research_client_filters_same_name_but_wrong_employer() -> None:
@@ -839,6 +1147,264 @@ def test_tavily_research_client_filters_same_name_but_wrong_employer() -> None:
     assert isinstance(snippets, list)
     assert len(snippets) == 1
     assert "Pendal Group" in snippets[0]
+
+
+def test_tavily_research_client_marks_possible_match_when_employer_is_missing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Andrew Swan distribution profile",
+                        "url": "https://example.com/profile",
+                        "content": "Andrew Swan is a distribution executive in Australian asset management with institutional sales experience.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name="Andrew Swan",
+            current_employer="Pendal Group",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    assert payload.fixture["identity_resolution_status"] == "possible_match"
+    assert "possible match" in str(payload.fixture["identity_resolution_rationale"]).lower()
+    assert isinstance(payload.fixture["possible_public_snippets"], list)
+
+
+def test_tavily_research_client_marks_not_verified_when_no_exact_profile_is_found() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Australian distribution careers overview",
+                        "url": "https://example.com/market-overview",
+                        "content": "Funds management distribution roles often cover platforms, advisers, and institutional investors across Australia.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name="Andrew Swan",
+            current_employer="Pendal Group",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    assert payload.fixture["identity_resolution_status"] == "not_verified"
+    assert "did not verify an exact-match profile" in str(payload.fixture["identity_resolution_rationale"]).lower()
+    assert payload.fixture["verified_public_snippets"] == []
+
+
+def test_tavily_research_client_extracts_billion_style_aum_context() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        query = str(payload["query"])
+        if "assets under management" in query:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Perpetual FY23 Financial Results Appendix",
+                            "url": "https://example.com/perpetual-results",
+                            "content": "Assets under Management, Funds under Advice and Funds under Administration Asset Management: AUM and flows 35 AUM by asset class ($b) For the period 30 June 2022 ($b) Pendal AUM (at 11 January 2023) Flows.",
+                        },
+                        {
+                            "title": "Has Pendal acquisition hindered Perpetual?",
+                            "url": "https://example.com/perpetual-news",
+                            "content": "This meant total Pendal Asset Management AUM was down from $44.6 billion at the end of March to $41 billion.",
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Anthony Serhan profile",
+                        "url": "https://example.com/profile",
+                        "content": "Anthony Serhan joined Pendal Group in 2018 as Distribution Director in Australia.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name="Anthony Serhan",
+            current_employer="Pendal Group",
+            current_title="Distribution Director",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    firm_context = payload.fixture["firm_aum_context"]
+    assert isinstance(firm_context, str)
+    assert "$44.6 billion" in firm_context
+    assert "estimated AUM" in firm_context
+    assert "still subject to verification" in firm_context
+    assert "Money Management This meant" not in firm_context
+
+
+def test_tavily_research_client_extracts_large_currency_amount_aum_context() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        query = str(payload["query"])
+        if "assets under management" in query:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Merricks Capital Pty Ltd in Melbourne",
+                            "url": "https://example.com/merricks-aum",
+                            "content": "Data sourced from SEC public records. Total assets under management $2,104,590,054. More info available on the adviser profile.",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Camelia Seric profile",
+                        "url": "https://example.com/profile",
+                        "content": "Camelia Seric joined Merricks Capital as Head of Distribution Wealth Management Australia and New Zealand.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_3",
+            full_name="Camelia Seric",
+            current_employer="Merricks Capital",
+            current_title="Head of Distribution Wealth Management Australia and New Zealand",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    firm_context = payload.fixture["firm_aum_context"]
+    assert isinstance(firm_context, str)
+    assert "$2,104,590,054" in firm_context
+    assert "estimated AUM" in firm_context
+    assert "still subject to verification" in firm_context
+
+
+def test_tavily_research_client_rejects_aum_attributed_to_other_entity() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        query = str(payload["query"])
+        if "assets under management" in query:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "SG Hiscock Property Fund Fact Sheets",
+                            "url": "https://example.com/sgh-factsheet",
+                            "content": "The principals were formerly employed at National Asset Management (NAM), a subsidiary of National Australia Bank which had $17 billion funds under management.",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Anthony Cochran profile",
+                        "url": "https://example.com/profile",
+                        "content": "Anthony Cochran is Head of Distribution at SG Hiscock & Company in Australia.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_5",
+            full_name="Anthony Cochran",
+            current_employer="SG Hiscock & Company",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    firm_context = payload.fixture["firm_aum_context"]
+    assert isinstance(firm_context, str)
+    assert "$17 billion" not in firm_context
+    assert "exact AUM figure should still be verified manually" in firm_context
+
+
+def test_tavily_research_client_rejects_year_like_billion_match() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        query = str(payload["query"])
+        if "assets under management" in query:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "SG Hiscock company overview",
+                            "url": "https://example.com/sgh-overview",
+                            "content": "SG Hiscock & Company was founded in 2001 B and remains a boutique manager focused on Australia.",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Anthony Cochran profile",
+                        "url": "https://example.com/profile",
+                        "content": "Anthony Cochran is Head of Distribution at SG Hiscock & Company in Australia.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_5",
+            full_name="Anthony Cochran",
+            current_employer="SG Hiscock & Company",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    firm_context = payload.fixture["firm_aum_context"]
+    assert isinstance(firm_context, str)
+    assert "2001 B" not in firm_context
+    assert "exact AUM still requires direct verification" in firm_context
 
 
 def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> None:
@@ -922,6 +1488,7 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
         model="claude-sonnet-4-5",
         intermediate_dir=str(intermediate_dir),
         research_fixture_path=str(fixture_path),
+        research_mode="fixture",
     )
 
     assert output_path.exists()
@@ -1003,6 +1570,7 @@ def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monke
         role_spec_path=str(role_spec_path),
         model="claude-sonnet-4-5",
         intermediate_dir=str(tmp_path / "intermediate"),
+        research_mode="fixture",
     )
 
     assert call_counter["count"] == 6
@@ -1134,15 +1702,83 @@ def test_run_ppp_pipeline_writes_failure_artifact_on_candidate_error(tmp_path, m
     intermediate_dir = tmp_path / "intermediate"
 
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
+    def fake_generate_text(self, *, system_prompt: str, user_prompt: str, model: str, max_tokens: int, extra=None):
+        payload = json.loads(user_prompt)
+        candidate_id = payload["schema_rules"]["candidate_id"]
+        candidate = _candidate_from_prompt(payload)
+        allowed_facts = _allowed_facts_from_prompt(payload)
+        tenure = _allowed_fact_section(allowed_facts, "tenure_years")
+        if candidate_id == "candidate_1":
+            return '{"candidate_id":"candidate_1"}'
+        return json.dumps(
+            {
+                "candidate_id": candidate_id,
+                "full_name": candidate["full_name"],
+                "current_role": {
+                    "title": candidate["current_title"],
+                    "employer": candidate["current_employer"],
+                    "tenure_years": tenure["value"] or 2.0,
+                },
+                "career_narrative": f"{candidate['full_name']} is listed in the task input as {candidate['current_title']} at {candidate['current_employer']}. The title suggests relevant client and channel exposure. Public evidence still leaves some scope questions open.",
+                "experience_tags": ["distribution", "client coverage"],
+                "firm_aum_context": f"{candidate['current_employer']} context requires verification.",
+                "mobility_signal": {
+                    "score": 3,
+                    "rationale": "Public chronology remains limited for this profile. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation."
+                },
+                "role_fit": {
+                    "role": "Head of Distribution / National BDM",
+                    "score": 7,
+                    "justification": f"{candidate['current_employer']} and the title {candidate['current_title']} suggest relevant distribution exposure. The available public evidence still leaves channel depth and leadership scale uncertain. Further verification is required before the supported distribution exposure can be treated as complete."
+                },
+                "outreach_hook": f"Your experience at {candidate['current_employer']} could make this role worth discussing."
+            }
+        )
+
+    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", fake_generate_text)
+
+    result = run_ppp_pipeline(
+        input_path=str(input_path),
+        output_path=str(tmp_path / "output.json"),
+        role_spec_path=str(role_spec_path),
+        model="claude-sonnet-4-5",
+        intermediate_dir=str(intermediate_dir),
+        research_mode="fixture",
+    )
+
+    assert (intermediate_dir / "candidate_1_error.json").exists()
+    assert result.delivery_status == "partial_success"
+    assert len(result.candidates) == 4
+    assert result.failed_candidates[0].candidate_id == "candidate_1"
+    assert result.failed_candidates[0].stage == "generation"
+
+
+def test_run_ppp_pipeline_raises_when_all_candidates_fail(tmp_path, monkeypatch) -> None:
+    input_path = tmp_path / "candidates.csv"
+    input_path.write_text(
+        "full_name,current_employer,current_title,linkedin_url\n"
+        "A,One,Title,https://example.com/1\n"
+        "B,Two,Title,https://example.com/2\n"
+        "C,Three,Title,https://example.com/3\n"
+        "D,Four,Title,https://example.com/4\n"
+        "E,Five,Title,https://example.com/5\n",
+        encoding="utf-8",
+    )
+    role_spec_path = tmp_path / "role.json"
+    role_spec_path.write_text(json.dumps({"role": "Head of Distribution / National BDM"}), encoding="utf-8")
+    intermediate_dir = tmp_path / "intermediate"
+
+    monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", lambda *args, **kwargs: '{"candidate_id":"candidate_1"}')
 
-    with pytest.raises(PPPTaskError):
+    with pytest.raises(PPPTaskError, match="failed for all candidates"):
         run_ppp_pipeline(
             input_path=str(input_path),
             output_path=str(tmp_path / "output.json"),
             role_spec_path=str(role_spec_path),
             model="claude-sonnet-4-5",
             intermediate_dir=str(intermediate_dir),
+            research_mode="fixture",
         )
 
-    assert (intermediate_dir / "candidate_1_error.json").exists()
+    assert (intermediate_dir / "run_report.json").exists()

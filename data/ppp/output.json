@@ -2,139 +2,131 @@
   "candidates": [
     {
       "candidate_id": "candidate_1",
-      "full_name": "Anthony Serhan",
+      "full_name": "Andrew Swan",
       "current_role": {
-        "title": "Distribution Director",
+        "title": "Head of Distribution",
         "employer": "Pendal Group",
-        "tenure_years": 8.0
+        "tenure_years": null
       },
-      "career_narrative": "Anthony Serhan is currently Distribution Director at Pendal Group, with public evidence pointing to a mixed distribution lane across multiple channels. This profile looks like a direct match for a Head of Distribution / National BDM brief because current title already signals senior distribution ownership, and public evidence supports mixed channel relevance. Public evidence does not fully confirm the broader scope here, and precise firm AUM remains unclear and verified current-role start date remains unclear should be confirmed in conversation.",
+      "career_narrative": "The task input places Andrew Swan at Pendal Group as Head of Distribution, but that identity could not be verified from public search. Commercially, the task input still reads like multi-channel global coverage, but without identity verification this remains a tentative market map and is not yet safe to action as a confirmed target; the remit already sits at broad distribution-leadership level, and public evidence points to global scope. What remains unclear from public evidence is whether the remit is mainly hands-on channel ownership or broader strategic leadership; product breadth across the current remit also needs testing.",
       "experience_tags": [
         "distribution leadership",
-        "relationship management",
-        "funds management",
-        "retail distribution",
-        "institutional distribution"
+        "asset management"
       ],
-      "firm_aum_context": "Unable to verify exact AUM from public sources for Pendal Group; based on firm type and sector context, the platform appears broadly comparable to an established funds-management platform.",
+      "firm_aum_context": "Pendal Group appears to be an active asset manager with an estimated AUM of $44.6 billion, based on recent public-web references and still subject to verification.",
       "mobility_signal": {
-        "score": 3,
-        "rationale": "Public chronology suggests approximately 8.0 years in the current role. No direct public signal of move readiness is visible, so mobility should therefore be treated as uncertain pending conversation."
+        "score": 2,
+        "rationale": "Public chronology could not be established from public search, although the task input still suggests global scope and head-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
-        "score": 7,
-        "justification": "Public evidence supports relevance from Distribution Director at Pendal Group because current title already signals senior distribution ownership, and public evidence supports mixed channel relevance. However, direct evidence of precise firm AUM remains unclear and verified current-role start date remains unclear remains unverified. This should be tested early in screening conversation, starting with whether precise firm AUM."
+        "score": 2,
+        "justification": "Market map only as an unverified market input; Head of Distribution at Pendal Group looks commercially plausible, but public search did not confirm that it maps to an exact-match profile. Key unresolved point: whether the remit is mainly hands-on channel ownership or broader strategic leadership; product breadth across the current remit also remains unverified. Screening priority: Has the remit been mainly hands-on channel ownership, or does it already carry broader strategic leadership responsibility?"
       },
-      "outreach_hook": "I'm reaching out because your Distribution Director background at Pendal Group appears relevant to a comparable distribution remit within a Head of Distribution / National BDM search."
+      "outreach_hook": "Hi Andrew, we're mapping the market around a distribution brief and could not yet verify an exact public profile, but wanted to compare whether your remit at Pendal Group overlaps with the commercial scope behind a senior distribution remit."
     },
     {
       "candidate_id": "candidate_2",
-      "full_name": "Lauren Prendiville",
+      "full_name": "Cathy Hales",
       "current_role": {
-        "title": "Global Head of Distribution and Marketing",
-        "employer": "First Sentier Group",
-        "tenure_years": 1.0
+        "title": "Head of Retail Sales",
+        "employer": "Perpetual Limited",
+        "tenure_years": null
       },
-      "career_narrative": "Lauren Prendiville is currently Global Head of Distribution and Marketing at First Sentier Group, with public evidence pointing to a wealth distribution lane. This profile looks like a direct match for a Head of Distribution / National BDM brief because current title already signals senior distribution ownership, and public evidence supports wealth channel relevance. Public evidence does not fully confirm the broader scope here, and precise firm AUM remains unclear and verified current-role start date remains unclear should be confirmed in conversation.",
+      "career_narrative": "Cathy Hales looks like a possible public match for Head of Retail Sales at Perpetual Limited, but the identity is still only partially confirmed across global scope and head-level seniority signals. This remains a possible match pending verification because the remit already sits in retail distribution leadership, and public evidence points to global scope; the commercial shape is useful even though the identity is not fully confirmed. What remains unclear from public evidence is how hands-on the role remains versus broad strategic oversight; whether the exposure is mainly ANZ, global, or local in practice also needs testing.",
       "experience_tags": [
-        "global distribution leadership",
-        "institutional sales",
-        "wealth distribution",
-        "client relationship management",
-        "marketing oversight"
+        "retail distribution",
+        "investment management",
+        "business development",
+        "executive leadership"
       ],
-      "firm_aum_context": "Unable to verify exact AUM from public sources for First Sentier Group; based on firm type and sector context, the platform appears broadly comparable to an established funds-management platform.",
+      "firm_aum_context": "Perpetual Limited appears to be an active asset manager with an estimated AUM of $9bn, based on recent public-web references and still subject to verification.",
       "mobility_signal": {
-        "score": 2,
-        "rationale": "Public chronology suggests approximately 1.0 years in the current role. No direct public signal of move readiness is visible, so mobility should therefore be treated as uncertain pending conversation."
+        "score": 3,
+        "rationale": "Public chronology remains incomplete because only a possible match surfaced, but the public record still points to global scope and head-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
-        "score": 6,
-        "justification": "Public evidence supports relevance from Global Head of Distribution and Marketing at First Sentier Group because current title already signals senior distribution ownership, and public evidence supports wealth channel relevance. However, direct evidence of precise firm AUM remains unclear and verified current-role start date remains unclear remains unverified. This should be tested early in screening conversation, starting with whether precise firm AUM."
+        "score": 4,
+        "justification": "Possible match pending verification; Head of Retail Sales at Perpetual Limited may bring relevant global retail coverage exposure, and the remit already sits in retail distribution leadership, and public evidence points to global scope, but identity confirmation still comes first. Key unresolved point: how hands-on the role remains versus broad strategic oversight; whether the exposure is mainly ANZ, global, or local in practice also remains unverified. Screening priority: How hands-on is the remit today versus broader strategic oversight?"
       },
-      "outreach_hook": "I'm reaching out because your Global Head of Distribution and Marketing background at First Sentier Group appears relevant to a comparable wealth distribution remit within a Head of Distribution / National BDM search."
+      "outreach_hook": "Hi Cathy, we're speaking with a small number of possible market matches around a distribution search and your work at Perpetual Limited appears directionally relevant on global senior distribution exposure with broader remit stretch."
     },
     {
       "candidate_id": "candidate_3",
-      "full_name": "Camelia Seric",
+      "full_name": "Jason Ennis",
       "current_role": {
-        "title": "Head of Distribution Wealth Management Australia and New Zealand",
-        "employer": "Merricks Capital",
-        "tenure_years": 4.0
+        "title": "Director, Inst. Sales",
+        "employer": "Fidelity International",
+        "tenure_years": null
       },
-      "career_narrative": "Camelia Seric is currently Head of Distribution Wealth Management Australia and New Zealand at Merricks Capital, with public evidence pointing to a wealth distribution lane. This profile looks like a direct match for a Head of Distribution / National BDM brief because current title already signals senior distribution ownership, and public evidence supports wealth channel relevance. Public evidence does not fully confirm the broader scope here, and precise firm AUM remains unclear and verified current-role start date remains unclear should be confirmed in conversation.",
+      "career_narrative": "Jason Ennis appears in the task input as Director, Inst Sales at Fidelity International, although public search did not verify an exact-match profile. Commercially, the task input still reads like institutional global coverage, but without identity verification this remains a tentative market map and is not yet safe to action as a confirmed target; the current role carries clear institutional exposure at senior level, and public evidence points to global scope. What remains unclear from public evidence is how much direct institutional and super-fund coverage sits behind the remit; product breadth across the current remit also needs testing.",
       "experience_tags": [
-        "wealth management distribution",
-        "institutional distribution",
-        "wholesale distribution",
-        "team leadership"
+        "institutional sales",
+        "global asset manager"
       ],
-      "firm_aum_context": "Unable to verify exact AUM from public sources for Merricks Capital; based on firm type and sector context, the platform appears broadly comparable to an established funds-management platform.",
+      "firm_aum_context": "Public filings do not confirm exact AUM for Fidelity International; firm profile indicates an established funds-management platform.",
       "mobility_signal": {
-        "score": 3,
-        "rationale": "Public chronology suggests approximately 4.0 years in the current role. No direct public signal of move readiness is visible, so mobility should therefore be treated as uncertain pending conversation."
+        "score": 2,
+        "rationale": "Public chronology could not be established from public search, although the task input still suggests global scope and director-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
-        "score": 7,
-        "justification": "Public evidence supports relevance from Head of Distribution Wealth Management Australia and New Zealand at Merricks Capital because current title already signals senior distribution ownership, and public evidence supports wealth channel relevance. However, direct evidence of precise firm AUM remains unclear and verified current-role start date remains unclear remains unverified. This should be tested early in screening conversation, starting with whether precise firm AUM."
+        "score": 2,
+        "justification": "Market map only as an unverified market input; Director, Inst Sales at Fidelity International looks commercially plausible, but public search did not confirm that it maps to an exact-match profile. Key unresolved point: how much direct institutional and super-fund coverage sits behind the remit; product breadth across the current remit also remains unverified. Screening priority: How much direct institutional and superannuation coverage sits within the role today?"
       },
-      "outreach_hook": "I'm reaching out because your Head of Distribution Wealth Management Australia and New Zealand background at Merricks Capital appears relevant to a comparable wealth distribution remit within a Head of Distribution / National BDM search."
+      "outreach_hook": "Hi Jason, before we treat your profile as action-ready for a distribution search, I wanted to lightly check whether your work at Fidelity International includes institutional and super-fund coverage behind the remit."
     },
     {
       "candidate_id": "candidate_4",
-      "full_name": "Luke Cheetham",
+      "full_name": "Deborah Southon",
       "current_role": {
-        "title": "Director Distribution",
-        "employer": "PM Capital",
-        "tenure_years": 0.0
+        "title": "Head of Distribution",
+        "employer": "Challenger Limited",
+        "tenure_years": null
       },
-      "career_narrative": "Luke Cheetham is currently Director Distribution at PM Capital, with public evidence pointing to a retail distribution lane. This profile looks commercially relevant on an adjacent basis for a Head of Distribution / National BDM brief because current title already signals senior distribution ownership, and public evidence supports retail channel relevance. Public evidence does not fully confirm the broader scope here, and precise current-role tenure remains unclear and precise firm AUM remains unclear should be confirmed in conversation.",
+      "career_narrative": "Deborah Southon appears in the task input as Head of Distribution at Challenger Limited, although public search did not verify an exact-match profile. Commercially, the task input still reads like multi-channel national coverage, but without identity verification this remains a tentative market map and is not yet safe to action as a confirmed target; the remit already sits at broad distribution-leadership level, and public evidence points to national scope. What remains unclear from public evidence is whether the remit is genuinely national or concentrated in a narrower market segment; team leadership scale behind the remit also needs testing.",
       "experience_tags": [
-        "retail distribution",
-        "intermediary channels",
-        "distribution leadership"
+        "distribution leadership",
+        "asset management"
       ],
-      "firm_aum_context": "Unable to verify exact AUM from public sources for PM Capital; based on firm type and sector context, the platform appears broadly comparable to an established funds-management platform.",
+      "firm_aum_context": "Challenger Limited appears to be an active asset manager with an estimated AUM of $98 billion, based on recent public-web references and still subject to verification.",
       "mobility_signal": {
-        "score": 3,
-        "rationale": "Public chronology does not clearly establish current-role tenure. No direct public signal of move readiness is visible, so mobility should therefore be treated as uncertain pending conversation."
+        "score": 2,
+        "rationale": "Public chronology remains unverified because no exact-match profile was confirmed, despite the task input reading like national scope at head-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
-        "score": 6,
-        "justification": "Public evidence supports relevance from Director Distribution at PM Capital because current title already signals senior distribution ownership, and public evidence supports retail channel relevance. However, direct evidence of precise current-role tenure remains unclear and precise firm AUM remains unclear remains unverified. This should be tested early in screening conversation, starting with whether precise current-role tenure."
+        "score": 2,
+        "justification": "Market map only as an unverified market input; Head of Distribution at Challenger Limited looks commercially plausible, but public search did not confirm that it maps to an exact-match profile. Key unresolved point: whether the remit is genuinely national or concentrated in a narrower market segment; team leadership scale behind the remit also remains unverified. Screening priority: Is the remit genuinely national, or is it concentrated in a narrower market segment?"
       },
-      "outreach_hook": "I'm reaching out because your Director Distribution background at PM Capital appears relevant to a an adjacent but relevant retail lane within a Head of Distribution / National BDM search."
+      "outreach_hook": "Hi Deborah, before we treat your profile as action-ready for a distribution search, I wanted to lightly check whether your work at Challenger Limited includes the commercial scope behind a senior distribution remit."
     },
     {
       "candidate_id": "candidate_5",
-      "full_name": "Anthony Cochran",
+      "full_name": "Nikki Thomas",
       "current_role": {
-        "title": "Head of Distribution",
-        "employer": "SG Hiscock & Company",
-        "tenure_years": 7.0
+        "title": "Senior BDM Wholesale",
+        "employer": "Magellan Financial",
+        "tenure_years": null
       },
-      "career_narrative": "Anthony Cochran is currently Head of Distribution at SG Hiscock & Company, with public evidence pointing to a wholesale distribution lane. This profile looks like a direct match for a Head of Distribution / National BDM brief because current title already signals senior distribution ownership, and public evidence supports wholesale channel relevance. Public evidence does not fully confirm the broader scope here, and precise firm AUM remains unclear and verified current-role start date remains unclear should be confirmed in conversation.",
+      "career_narrative": "Public evidence places Nikki Thomas in a wholesale lane at Magellan Financial, with global scope and BDM-level seniority attached to the remit. More of a progression case than a replica remit; even so, the current role carries clear wholesale distribution exposure, and public evidence points to global scope. What remains unclear from public evidence is how much direct IFA and platform penetration sits behind the remit; team leadership scale behind the remit also needs testing.",
       "experience_tags": [
         "wholesale distribution",
-        "business development",
-        "national distribution",
-        "funds management"
+        "global equities",
+        "cfa charterholder"
       ],
-      "firm_aum_context": "Unable to verify exact AUM from public sources for SG Hiscock & Company; based on firm type and sector context, the platform appears broadly comparable to an established funds-management platform.",
+      "firm_aum_context": "Magellan Financial appears to be an active asset manager with an estimated AUM of $39.6 billion, based on recent public-web references and still subject to verification.",
       "mobility_signal": {
         "score": 3,
-        "rationale": "Public chronology suggests approximately 7.0 years in the current role. No direct public signal of move readiness is visible, so mobility should therefore be treated as uncertain pending conversation."
+        "rationale": "Live public-web research did not clearly establish public chronology for the current role. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
-        "score": 7,
-        "justification": "Public evidence supports relevance from Head of Distribution at SG Hiscock & Company because current title already signals senior distribution ownership, and public evidence supports wholesale channel relevance. However, direct evidence of precise firm AUM remains unclear and verified current-role start date remains unclear remains unverified. This should be tested early in screening conversation, starting with whether precise firm AUM."
+        "score": 5,
+        "justification": "Adjacent step-up conversation; Senior BDM Wholesale at Magellan Financial brings relevant global wholesale coverage exposure, and the current role carries clear wholesale distribution exposure, and public evidence points to global scope. Key unresolved point: how much direct IFA and platform penetration sits behind the remit; team leadership scale behind the remit also remains unverified. Screening priority: How much direct IFA and platform penetration sits behind the remit today?"
       },
-      "outreach_hook": "I'm reaching out because your Head of Distribution background at SG Hiscock & Company appears relevant to a comparable wholesale expansion remit within a Head of Distribution / National BDM search."
+      "outreach_hook": "Hi Nikki, one of our current distribution briefs could be a genuine stretch from your role at Magellan Financial, especially given the overlap with wholesale coverage stepping toward broader distribution leadership; open to a quick chat?"
     }
   ]
 }

@@ -13,6 +13,7 @@ from app.ppp.research import PublicResearchClient, ResearchClientError
 
 VerificationStatus = Literal["verified", "strongly_inferred", "uncertain"]
 ConfidenceLevel = Literal["high", "medium", "low"]
+IdentityResolutionStatus = Literal["verified_match", "possible_match", "not_verified"]
 ChannelOrientation = Literal["institutional", "wholesale", "wealth", "retail", "mixed", "unclear"]
 MandateSimilarity = Literal["direct_match", "adjacent_match", "step_up_candidate", "unclear_fit"]
 ScopeSignal = Literal["national", "anz", "global", "regional", "unclear"]
@@ -20,6 +21,10 @@ SenioritySignal = Literal["head_level", "director_level", "bdm_level", "unclear"
 EvidenceStrength = Literal["strong", "moderate", "thin"]
 
 QUALIFIER_TERMS = ("unverified", "verification", "estimated", "limited public visibility", "cautious", "approx", "verify")
+AUM_NUMERIC_PATTERN = re.compile(
+    r"(?i)(?:(?:A\$|AUD|USD|\$|£|€)?\s*\d+(?:\.\d+)?\s*(?:B|M|bn|mn|billion|million|trillion)\b|"
+    r"(?:A\$|AUD|USD|\$|£|€)\s*\d{1,3}(?:,\d{3}){2,}(?:\.\d+)?\b)"
+)
 
 
 class LookupSource(BaseModel):
@@ -95,6 +100,25 @@ class CandidatePublicProfileLookupInput(BaseModel):
         return cls(candidate_id=candidate_id, **candidate.model_dump(mode="json"))
 
 
+class IdentityResolution(BaseModel):
+    status: IdentityResolutionStatus
+    rationale: str
+    matched_source_labels: list[str] = Field(default_factory=list)
+
+    @field_validator("rationale")
+    @classmethod
+    def _require_rationale(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Field cannot be empty.")
+        return normalized
+
+    @field_validator("matched_source_labels")
+    @classmethod
+    def _strip_source_labels(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item and item.strip()]
+
+
 class RecruiterSignals(BaseModel):
     channel_orientation: ChannelOrientation
     mandate_similarity: MandateSimilarity
@@ -128,6 +152,7 @@ class CandidateEnrichmentResult(BaseModel):
     current_employer: str
     current_title: str
     linkedin_url: str
+    identity_resolution: IdentityResolution
     sources: list[LookupSource]
     claims: list[ResearchClaim]
     verification: VerificationSummary
@@ -170,6 +195,18 @@ class CandidateEnrichmentResult(BaseModel):
         }
         return [self.field_support(field_name) for field_name in sorted(field_names)]
 
+    def trajectory_hint(self) -> str:
+        tenure = self.inferred_tenure_years
+        scope = self.recruiter_signals.scope_signal
+        seniority = self.recruiter_signals.seniority_signal
+        if tenure is not None:
+            return f"Public chronology suggests roughly {tenure:.1f} years in role, with {scope} scope and {seniority} seniority cues."
+        if self.identity_resolution.status == "possible_match":
+            return f"Chronology is incomplete, but the visible remit still points to {scope} scope and {seniority} seniority."
+        if self.identity_resolution.status == "not_verified":
+            return f"Chronology is unverified, yet the task input still reads like {scope} scope and {seniority} seniority."
+        return f"Chronology remains incomplete, although the current role still signals {scope} scope and {seniority} seniority."
+
     def allowed_facts(self) -> dict[str, Any]:
         current_role_claims = self.claims_for_output_field("current_role")
         tenure_claim = self.best_claim("tenure")
@@ -194,6 +231,7 @@ class CandidateEnrichmentResult(BaseModel):
             ]
 
         return {
+            "identity_resolution": self.identity_resolution.model_dump(mode="json"),
             "current_role": {
                 "title": self.current_title,
                 "employer": self.current_employer,
@@ -227,6 +265,7 @@ class CandidateEnrichmentResult(BaseModel):
             },
             "mobility_signal": {
                 "supported_by_claim_ids": [claim.claim_id for claim in mobility_claims],
+                "trajectory_hint": self.trajectory_hint(),
                 "allowed_reasoning": [
                     "Tenure, trajectory, and explicit public signals only",
                     "Use cautious language when mobility intent is not directly observed",
@@ -270,6 +309,7 @@ class CandidateEnrichmentResult(BaseModel):
                 "current_title": self.current_title,
                 "linkedin_url": self.linkedin_url,
             },
+            "identity_resolution": self.identity_resolution.model_dump(mode="json"),
             "sources": [source.model_dump(mode="json") for source in self.sources],
             "claims": [claim.model_dump(mode="json") for claim in self.claims],
             "verification": self.verification.model_dump(mode="json"),
@@ -353,13 +393,24 @@ class CandidatePublicProfileLookupTool:
                 [
                     "This enrichment run is fixture-backed and should be upgraded with live public-web verification before final submission.",
                 ],
+            )
+            + (
+                [str(fixture["combined_context"]).strip()]
+                if isinstance(fixture.get("combined_context"), str) and str(fixture["combined_context"]).strip()
+                else []
             ),
+        )
+        identity_resolution = self._resolve_identity_resolution(tool_input=tool_input, fixture=fixture, tool_mode=tool_mode)
+        verification = self._apply_identity_verification_defaults(
+            verification=verification,
+            identity_resolution=identity_resolution,
         )
         claims = self._build_claims(tool_input, fixture, sources=sources, verification=verification)
         recruiter_signals = derive_recruiter_signals(
             tool_input=tool_input,
             claims=claims,
             verification=verification,
+            identity_resolution=identity_resolution,
         )
         return CandidateEnrichmentResult(
             tool_mode=tool_mode,
@@ -368,6 +419,7 @@ class CandidatePublicProfileLookupTool:
             current_employer=tool_input.current_employer,
             current_title=tool_input.current_title,
             linkedin_url=tool_input.linkedin_url,
+            identity_resolution=identity_resolution,
             sources=sources,
             claims=claims,
             verification=verification,
@@ -400,25 +452,58 @@ class CandidatePublicProfileLookupTool:
         claims: list[ResearchClaim] = []
         source_labels = [source.label for source in sources]
         primary_source = source_labels[:1] or ["PPP task input CSV"]
+        identity_status = str(fixture.get("identity_resolution_status", "possible_match")).strip().lower()
+        identity_rationale = str(fixture.get("identity_resolution_rationale", "")).strip()
+        identity_source_labels = self._list_value(fixture, "identity_resolution_source_labels", primary_source)
+
+        if identity_rationale:
+            claims.append(
+                ResearchClaim(
+                    claim_id=f"{tool_input.candidate_id}_identity_1",
+                    category="identity_resolution",
+                    statement=identity_rationale,
+                    verification_status="verified" if identity_status == "verified_match" else "uncertain",
+                    confidence="high" if identity_status == "verified_match" else "low",
+                    source_labels=identity_source_labels,
+                    supports_output_fields=["career_narrative", "current_role", "mobility_signal", "role_fit", "outreach_hook"],
+                )
+            )
 
         verified_snippets = self._list_value(
             fixture,
             "verified_public_snippets",
-            [
-                f"Provided task input lists {tool_input.full_name} as {tool_input.current_title} at {tool_input.current_employer}.",
-            ],
+            [],
         )
+        possible_snippets = self._list_value(fixture, "possible_public_snippets", [])
+        if identity_status == "verified_match":
+            current_role_snippets = verified_snippets[:2] or [
+                f"Public sources verify {tool_input.full_name} as {tool_input.current_title} at {tool_input.current_employer}.",
+            ]
+            current_role_status: VerificationStatus = "verified"
+            current_role_confidence: ConfidenceLevel = "high"
+        elif identity_status == "possible_match":
+            current_role_snippets = possible_snippets[:2] or verified_snippets[:2] or [
+                f"Public search surfaced a possible match for {tool_input.full_name} at {tool_input.current_employer}, but the exact public identity remains unconfirmed.",
+            ]
+            current_role_status = "uncertain"
+            current_role_confidence = "low"
+        else:
+            current_role_snippets = [
+                f"Task input lists {tool_input.full_name} as {tool_input.current_title} at {tool_input.current_employer}, but public search did not verify an exact-match profile.",
+            ]
+            current_role_status = "uncertain"
+            current_role_confidence = "low"
         claims.extend(
             ResearchClaim(
                 claim_id=f"{tool_input.candidate_id}_current_role_{idx}",
                 category="current_role",
                 statement=snippet,
-                verification_status="verified",
-                confidence="high" if idx == 1 else "medium",
-                source_labels=primary_source,
+                verification_status=current_role_status,
+                confidence="high" if current_role_status == "verified" and idx == 1 else current_role_confidence,
+                source_labels=identity_source_labels,
                 supports_output_fields=["career_narrative", "role_fit", "current_role", "outreach_hook"],
             )
-            for idx, snippet in enumerate(verified_snippets[:2], start=1)
+            for idx, snippet in enumerate(current_role_snippets, start=1)
         )
 
         inferred_tenure_years = self._infer_tenure_years(fixture)
@@ -440,7 +525,7 @@ class CandidatePublicProfileLookupTool:
             self._list_value(
                 fixture,
                 "likely_channel_evidence",
-                [f"The title '{tool_input.current_title}' suggests senior distribution channel responsibility."],
+                [_default_channel_evidence(tool_input)],
             ),
             start=1,
         ):
@@ -460,7 +545,7 @@ class CandidatePublicProfileLookupTool:
             self._list_value(
                 fixture,
                 "likely_experience_evidence",
-                [f"Current employer/title pairing suggests relevance to funds-management client coverage at {tool_input.current_employer}."],
+                [_default_experience_evidence(tool_input)],
             ),
             start=1,
         ):
@@ -537,6 +622,99 @@ class CandidatePublicProfileLookupTool:
 
         return claims
 
+    def _resolve_identity_resolution(
+        self,
+        *,
+        tool_input: CandidatePublicProfileLookupInput,
+        fixture: dict[str, Any],
+        tool_mode: str,
+    ) -> IdentityResolution:
+        explicit_status = fixture.get("identity_resolution_status")
+        explicit_rationale = fixture.get("identity_resolution_rationale")
+        explicit_source_labels = self._list_value(fixture, "identity_resolution_source_labels", ["PPP task input CSV"])
+        if isinstance(explicit_status, str):
+            status = explicit_status.strip().lower()
+            if status in {"verified_match", "possible_match", "not_verified"}:
+                rationale = str(explicit_rationale).strip() if isinstance(explicit_rationale, str) and explicit_rationale.strip() else self._default_identity_rationale(
+                    tool_input=tool_input,
+                    status=status,
+                    tool_mode=tool_mode,
+                )
+                return IdentityResolution(
+                    status=status,
+                    rationale=rationale,
+                    matched_source_labels=explicit_source_labels,
+                )
+
+        default_status: IdentityResolutionStatus = "verified_match"
+        if tool_mode == "fixture_fallback":
+            default_status = "possible_match"
+        elif tool_mode == "live_web":
+            default_status = "not_verified"
+        rationale = self._default_identity_rationale(
+            tool_input=tool_input,
+            status=default_status,
+            tool_mode=tool_mode,
+        )
+        return IdentityResolution(
+            status=default_status,
+            rationale=rationale,
+            matched_source_labels=explicit_source_labels,
+        )
+
+    def _default_identity_rationale(
+        self,
+        *,
+        tool_input: CandidatePublicProfileLookupInput,
+        status: IdentityResolutionStatus,
+        tool_mode: str,
+    ) -> str:
+        if status == "verified_match":
+            return (
+                f"Public sources verify a match for {tool_input.full_name} at {tool_input.current_employer} "
+                f"in the role {tool_input.current_title}."
+            )
+        if status == "possible_match":
+            if tool_mode in {"fixture_backed", "fixture_fallback"}:
+                return (
+                    f"Task input for {tool_input.full_name} is being treated as an illustrative or partially verified profile; "
+                    "exact public identity still requires live verification."
+                )
+            return (
+                f"Public search surfaced a possible match for {tool_input.full_name}, but the exact public identity "
+                f"at {tool_input.current_employer} is not fully confirmed."
+            )
+        return (
+            f"Public search did not verify an exact-match profile for {tool_input.full_name} at {tool_input.current_employer}; "
+            "treat the task input as unverified and avoid presenting identity-dependent details as confirmed facts."
+        )
+
+    def _apply_identity_verification_defaults(
+        self,
+        *,
+        verification: VerificationSummary,
+        identity_resolution: IdentityResolution,
+    ) -> VerificationSummary:
+        missing_fields = list(verification.missing_fields)
+        uncertain_fields = list(verification.uncertain_fields)
+        confidence_notes = list(verification.confidence_notes)
+
+        if identity_resolution.status != "verified_match":
+            if "exact-match public identity" not in missing_fields:
+                missing_fields.insert(0, "exact-match public identity")
+            if "identity-linked chronology" not in uncertain_fields:
+                uncertain_fields.insert(0, "identity-linked chronology")
+        if identity_resolution.status == "not_verified":
+            if "identity-specific channel history" not in uncertain_fields:
+                uncertain_fields.insert(1, "identity-specific channel history")
+        confidence_notes.insert(0, identity_resolution.rationale)
+
+        return VerificationSummary(
+            missing_fields=missing_fields,
+            uncertain_fields=uncertain_fields,
+            confidence_notes=confidence_notes,
+        )
+
     def _lookup_live(self, tool_input: CandidatePublicProfileLookupInput) -> dict[str, Any]:
         if self.research_client is None:
             raise ResearchClientError("Live research mode requires a configured public research client.")
@@ -555,14 +733,14 @@ class CandidatePublicProfileLookupTool:
             today = datetime.now(UTC)
             months = max(1, (today.year - start_year) * 12 + (today.month - int(start_month)))
             return round(months / 12.0, 1)
-        return -1.0
+        return None
 
     def _build_tenure_rationale(self, fixture: dict[str, Any], tenure_years: float | None) -> str:
         if isinstance(fixture.get("tenure_rationale"), str) and fixture["tenure_rationale"].strip():
             return fixture["tenure_rationale"].strip()
         if tenure_years is not None and tenure_years >= 0:
             return f"Estimated at approximately {tenure_years:.1f} years based on controlled research chronology."
-        return "Tenure mapped to placeholder (-1.0) as public chronology is unavailable."
+        return "Exact current-role tenure could not be established from the available fixture-backed public chronology."
 
     def _format_firm_aum_context(self, employer: str, fixture: dict[str, Any]) -> str:
         if isinstance(fixture.get("firm_aum_context"), str) and fixture["firm_aum_context"].strip():
@@ -608,11 +786,12 @@ def derive_recruiter_signals(
     tool_input: CandidatePublicProfileLookupInput,
     claims: list[ResearchClaim],
     verification: VerificationSummary,
+    identity_resolution: IdentityResolution,
 ) -> RecruiterSignals:
     channel_orientation = _derive_channel_orientation(tool_input=tool_input, claims=claims)
     scope_signal = _derive_scope_signal(tool_input=tool_input, claims=claims)
     seniority_signal = _derive_seniority_signal(tool_input=tool_input)
-    evidence_strength = _derive_evidence_strength(claims=claims)
+    evidence_strength = _derive_evidence_strength(claims=claims, identity_resolution=identity_resolution)
     mandate_similarity = _derive_mandate_similarity(
         tool_input=tool_input,
         claims=claims,
@@ -620,6 +799,7 @@ def derive_recruiter_signals(
         scope_signal=scope_signal,
         seniority_signal=seniority_signal,
         evidence_strength=evidence_strength,
+        identity_resolution=identity_resolution,
     )
     key_sell_points = _derive_key_sell_points(
         tool_input=tool_input,
@@ -658,11 +838,15 @@ def derive_recruiter_signals(
 
 def _firm_context_status(statement: str) -> VerificationStatus:
     lowered = statement.lower()
+    if _contains_numeric_aum(statement):
+        return "strongly_inferred"
     if any(term in lowered for term in QUALIFIER_TERMS):
         return "uncertain"
-    if re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", lowered):
-        return "strongly_inferred"
     return "verified"
+
+
+def _contains_numeric_aum(text: str) -> bool:
+    return bool(AUM_NUMERIC_PATTERN.search(text))
 
 
 def _verification_rank(status: VerificationStatus) -> int:
@@ -734,6 +918,36 @@ def _derive_channel_orientation(
     return "unclear"
 
 
+def _default_channel_evidence(tool_input: CandidatePublicProfileLookupInput) -> str:
+    title = tool_input.current_title.lower()
+    if _is_non_distribution_title(title):
+        return (
+            f"The title '{tool_input.current_title}' points more to investment, research, or analytical work than to a proven "
+            "client/distribution remit."
+        )
+    if any(term in title for term in ("distribution", "sales", "coverage", "relationship", "investor relations", "bdm")):
+        return f"The title '{tool_input.current_title}' suggests channel-facing commercial responsibility."
+    return (
+        f"The title '{tool_input.current_title}' does not on its own verify direct channel ownership; "
+        "commercial relevance should be treated cautiously pending stronger public evidence."
+    )
+
+
+def _default_experience_evidence(tool_input: CandidatePublicProfileLookupInput) -> str:
+    title = tool_input.current_title.lower()
+    if _is_non_distribution_title(title):
+        return (
+            f"Current employer/title pairing at {tool_input.current_employer} suggests adjacent investment-platform experience, "
+            "but not a verified sales, distribution, or investor-relations remit."
+        )
+    if any(term in title for term in ("distribution", "sales", "coverage", "relationship", "investor relations", "bdm")):
+        return f"Current employer/title pairing suggests relevance to funds-management client coverage at {tool_input.current_employer}."
+    return (
+        f"Current employer/title pairing suggests adjacency to a funds-management business at {tool_input.current_employer}, "
+        "but direct channel-facing commercial ownership is not yet verified publicly."
+    )
+
+
 def _extract_channel_categories(text: str) -> list[ChannelOrientation]:
     lowered = text.lower()
     categories: list[ChannelOrientation] = []
@@ -756,6 +970,7 @@ def _derive_mandate_similarity(
     scope_signal: ScopeSignal,
     seniority_signal: SenioritySignal,
     evidence_strength: EvidenceStrength,
+    identity_resolution: IdentityResolution,
 ) -> MandateSimilarity:
     title = tool_input.current_title.lower()
     claim_text = " ".join(claim.statement.lower() for claim in claims if claim.category in {"current_role", "channel_experience", "experience"})
@@ -770,13 +985,24 @@ def _derive_mandate_similarity(
     has_bdm = "bdm" in title or "business development manager" in title
     head_scope = scope_signal in {"national", "anz", "global", "regional"}
 
+    if identity_resolution.status == "not_verified":
+        return "unclear_fit"
+    if _is_non_distribution_title(title):
+        return "unclear_fit"
+
     if evidence_strength == "thin" and seniority_signal == "unclear":
         return "unclear_fit"
     if has_head_distribution and seniority_signal == "head_level":
+        if identity_resolution.status == "possible_match":
+            return "adjacent_match"
         return "direct_match"
     if has_national_bdm:
+        if identity_resolution.status == "possible_match":
+            return "adjacent_match"
         return "direct_match"
     if seniority_signal == "head_level" and has_distribution_lead and (channel_orientation != "unclear" or head_scope):
+        if identity_resolution.status == "possible_match":
+            return "adjacent_match"
         return "direct_match"
     if seniority_signal == "head_level" and channel_orientation in {"institutional", "wholesale", "wealth", "retail", "mixed"}:
         return "adjacent_match"
@@ -944,11 +1170,28 @@ def _derive_scope_signal(
         return "anz"
     if any(term in text for term in ("apac", "asia pacific", "asia-pacific", "emea", "regional")):
         return "regional"
-    if any(term in text for term in ("national", "australia", "australian")):
+    if any(term in text for term in ("national", " in australia", " across australia", " australia-based", " australia based")):
         return "national"
     if any(term in tool_input.current_title.lower() for term in ("head of distribution", "distribution director", "director distribution", "head of sales", "national bdm")):
         return "national"
     return "unclear"
+
+
+def _is_non_distribution_title(title: str) -> bool:
+    return any(
+        phrase in title
+        for phrase in (
+            "investment analyst",
+            "equity analyst",
+            "equities analyst",
+            "research analyst",
+            "investment research",
+            "portfolio analyst",
+            "portfolio manager",
+            "analyst",
+            "research",
+        )
+    ) and not any(term in title for term in ("investor relations", "relationship", "coverage", "sales", "distribution", "bdm"))
 
 
 def _derive_seniority_signal(*, tool_input: CandidatePublicProfileLookupInput) -> SenioritySignal:
@@ -964,10 +1207,16 @@ def _derive_seniority_signal(*, tool_input: CandidatePublicProfileLookupInput) -
     return "unclear"
 
 
-def _derive_evidence_strength(*, claims: list[ResearchClaim]) -> EvidenceStrength:
+def _derive_evidence_strength(*, claims: list[ResearchClaim], identity_resolution: IdentityResolution) -> EvidenceStrength:
+    if identity_resolution.status == "not_verified":
+        return "thin"
     remit_claims = [claim for claim in claims if claim.category in {"current_role", "channel_experience", "experience", "firm_context"}]
     strong_count = sum(claim.verification_status in {"verified", "strongly_inferred"} for claim in remit_claims)
     verified_count = sum(claim.verification_status == "verified" for claim in remit_claims)
+    if identity_resolution.status == "possible_match":
+        if verified_count >= 1 and strong_count >= 3:
+            return "moderate"
+        return "thin" if strong_count < 3 else "moderate"
     if verified_count >= 1 and strong_count >= 3:
         return "strong"
     if strong_count >= 2:

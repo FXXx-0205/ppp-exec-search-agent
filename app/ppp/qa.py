@@ -186,6 +186,16 @@ def run_bundle_qa(
     return QAReport(passed=not any(item.severity == "error" for item in findings), findings=findings)
 
 
+def run_candidate_qa(
+    *,
+    candidate: CandidateBrief,
+    input_candidate: CandidateCSVRow | None,
+    enrichment: CandidateEnrichmentResult | None,
+) -> QAReport:
+    findings = _check_candidate(candidate, input_candidate, enrichment)
+    return QAReport(passed=not any(item.severity == "error" for item in findings), findings=findings)
+
+
 def validate_output_bundle(
     *,
     output_path: str,
@@ -316,7 +326,7 @@ def _check_candidate(
             _error(
                 candidate.candidate_id,
                 "firm_aum_context_uncertainty",
-                "firm_aum_context should explicitly state when exact AUM cannot be verified and keep any estimate qualitative.",
+                "firm_aum_context should either stay qualitative when AUM is unverified or clearly frame any numeric AUM as an estimate based on public references.",
             )
         )
 
@@ -404,7 +414,7 @@ def _justification_mentions_evidence(
 
 
 def _mentions_specific_aum_without_support(text: str, enrichment: CandidateEnrichmentResult | None) -> bool:
-    has_amount = bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", text.lower()))
+    has_amount = _contains_numeric_aum(text)
     if not has_amount:
         return False
     if _contains_qualifier(text):
@@ -412,7 +422,7 @@ def _mentions_specific_aum_without_support(text: str, enrichment: CandidateEnric
     if enrichment is None:
         return True
     for claim in enrichment.claims_for_output_field("firm_aum_context"):
-        if claim.verification_status == "verified" and re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", claim.statement.lower()):
+        if claim.verification_status in {"verified", "strongly_inferred"} and _contains_numeric_aum(claim.statement):
             return False
     return True
 
@@ -765,26 +775,50 @@ def _contains_specific_commercial_angle(text: str, enrichment: CandidateEnrichme
 
 def _firm_aum_context_handles_uncertainty(text: str, enrichment: CandidateEnrichmentResult) -> bool:
     has_verified_numeric = any(
-        claim.verification_status == "verified" and bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", claim.statement.lower()))
+        claim.verification_status in {"verified", "strongly_inferred"} and _contains_numeric_aum(claim.statement)
         for claim in enrichment.claims_for_output_field("firm_aum_context")
     )
     if has_verified_numeric:
-        return True
+        return _contains_qualifier(text)
     lowered = text.lower()
-    if bool(re.search(r"(\$|aud\s*)\d+(\.\d+)?\s*[bm]", lowered)):
-        return False
-    required_markers = (
+    if _contains_numeric_aum(text):
+        numeric_qualifiers = (
+            "estimated",
+            "est.",
+            "subject to verification",
+            "public-web references",
+            "public references",
+            "approximately",
+            "approx",
+            "treated here as",
+            "still subject to manual verification",
+        )
+        return any(marker in lowered for marker in numeric_qualifiers)
+    qualitative_markers = (
         "unable to verify",
         "public evidence does not confirm",
         "public filings do not confirm",
         "public aum remains unverified",
         "exact aum is unavailable",
-        "estimated",
-        "treated here as",
+        "unverified",
+        "unavailable",
         "based on firm type and sector context",
         "firm profile indicates",
     )
-    return any(marker in lowered for marker in required_markers)
+    return any(marker in lowered for marker in qualitative_markers)
+
+
+def _contains_numeric_aum(text: str) -> bool:
+    lowered = text.lower()
+    scaled_match = re.search(
+        r"(?i)(?:a\$|aud|usd|\$|£|€)?\s*\d+(?:\.\d+)?\s*(?:b|m|bn|mn|billion|million|trillion)\b",
+        lowered,
+    )
+    large_amount_match = re.search(
+        r"(?i)(?:a\$|aud|usd|\$|£|€)\s*\d{1,3}(?:,\d{3}){2,}(?:\.\d+)?\b",
+        lowered,
+    )
+    return bool(scaled_match or large_amount_match)
 
 
 def _mobility_has_uncertainty_structure(text: str) -> bool:

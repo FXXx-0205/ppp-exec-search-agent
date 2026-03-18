@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -10,7 +10,7 @@ from app.ppp.models import ROLE_NAME
 class CurrentRole(BaseModel):
     title: str
     employer: str
-    tenure_years: float
+    tenure_years: float | None
 
     @field_validator("title", "employer")
     @classmethod
@@ -89,9 +89,41 @@ class PPPOutput(BaseModel):
 
     @model_validator(mode="after")
     def _validate_candidate_count(self) -> "PPPOutput":
-        if len(self.candidates) != 5:
-            raise ValueError("output.json must contain exactly five candidates.")
+        if not self.candidates:
+            raise ValueError("output.json must contain at least one candidate.")
+        if len(self.candidates) > 5:
+            raise ValueError("output.json cannot contain more than five candidates.")
         return self
+
+
+class CandidateRunFailure(BaseModel):
+    candidate_id: str
+    full_name: str
+    stage: Literal["enrichment", "generation", "candidate_qa", "bundle_qa"]
+    error_message: str
+    artifact_path: str | None = None
+
+
+class PPPRunResult(BaseModel):
+    output: PPPOutput
+    failed_candidates: list[CandidateRunFailure] = Field(default_factory=list)
+    delivery_status: Literal["success", "partial_success"]
+    warnings: list[str] = Field(default_factory=list)
+    output_path: str | None = None
+    qa_report_path: str | None = None
+    run_report_path: str | None = None
+
+    @property
+    def candidates(self) -> list[CandidateBrief]:
+        return self.output.candidates
+
+    @property
+    def successful_candidate_count(self) -> int:
+        return len(self.output.candidates)
+
+    @property
+    def failed_candidate_count(self) -> int:
+        return len(self.failed_candidates)
 
 
 def validate_candidate_brief(payload: Any) -> CandidateBrief:
