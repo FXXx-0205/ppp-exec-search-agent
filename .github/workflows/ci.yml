@@ -21,10 +21,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Ruff
-        run: ruff check app/api app/core app/llm app/models app/repositories app/services app/workflows tests scripts/init_db.py
+        run: ruff check app/config.py app/core app/llm app/ppp streamlit_app.py scripts/run_ppp_task.py tests
 
       - name: Mypy
-        run: mypy app/api app/core app/llm app/models app/repositories app/services app/workflows tests
+        run: mypy app/config.py app/core app/llm app/ppp scripts/run_ppp_task.py tests
 
       - name: Bandit
         run: bandit -q -r app

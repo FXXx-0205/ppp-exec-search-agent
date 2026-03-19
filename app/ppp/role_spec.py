@@ -73,14 +73,14 @@ def normalize_role_spec(payload: Any) -> dict[str, Any]:
     }
 
     for output_key, aliases in scalar_aliases.items():
-        value = _first_clean_scalar(payload, aliases)
-        if value:
-            normalized[output_key] = value
+        scalar_value = _first_clean_scalar(payload, aliases)
+        if scalar_value:
+            normalized[output_key] = scalar_value
 
     for output_key, aliases in list_aliases.items():
-        value = _first_clean_list(payload, aliases)
-        if value:
-            normalized[output_key] = value
+        list_value = _first_clean_list(payload, aliases)
+        if list_value:
+            normalized[output_key] = list_value
 
     # Preserve any additional structured keys so the prompt can still use them.
     for key, value in payload.items():
@@ -116,7 +116,7 @@ def _first_clean_list(payload: dict[str, Any], keys: tuple[str, ...]) -> list[st
     for key in keys:
         value = payload.get(key)
         if isinstance(value, list):
-            cleaned = [_clean_string(item) for item in value if _clean_string(item)]
+            cleaned = [cleaned_item for item in value if (cleaned_item := _clean_string(item))]
             if cleaned:
                 return cleaned
     return []

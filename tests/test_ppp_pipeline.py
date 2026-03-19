@@ -7,14 +7,24 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from app.ppp.enrichment import CandidatePublicProfileLookupInput, CandidatePublicProfileLookupTool
-from app.ppp.pipeline import PPPTaskError, _load_candidates_csv, _load_role_spec, _resolve_research_mode, _stabilize_candidate_brief, run_ppp_pipeline
+from app.ppp.enrichment import (
+    CandidatePublicProfileLookupInput,
+    CandidatePublicProfileLookupTool,
+    _firm_context_status,
+)
+from app.ppp.pipeline import (
+    PPPTaskError,
+    _load_candidates_csv,
+    _load_role_spec,
+    _resolve_research_mode,
+    _stabilize_candidate_brief,
+    run_ppp_pipeline,
+)
 from app.ppp.qa import run_bundle_qa, validate_output_bundle
 from app.ppp.research import ResearchClientError, TavilyResearchClient
 from app.ppp.role_spec import load_role_spec_json_text, normalize_role_spec, parse_role_spec_text
 from app.ppp.schema import validate_output_document
 from app.ppp.validator import validate_and_repair_candidate_payload
-from app.ppp.enrichment import _firm_context_status
 
 
 def _candidate_from_prompt(payload: dict[str, object]) -> dict[str, str]:

@@ -4,7 +4,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -635,13 +635,14 @@ class CandidatePublicProfileLookupTool:
         if isinstance(explicit_status, str):
             status = explicit_status.strip().lower()
             if status in {"verified_match", "possible_match", "not_verified"}:
+                typed_status = cast(IdentityResolutionStatus, status)
                 rationale = str(explicit_rationale).strip() if isinstance(explicit_rationale, str) and explicit_rationale.strip() else self._default_identity_rationale(
                     tool_input=tool_input,
-                    status=status,
+                    status=typed_status,
                     tool_mode=tool_mode,
                 )
                 return IdentityResolution(
-                    status=status,
+                    status=typed_status,
                     rationale=rationale,
                     matched_source_labels=explicit_source_labels,
                 )
@@ -911,7 +912,7 @@ def _derive_channel_orientation(
     if ranked:
         if len(ranked) > 1 and ranked[0][0] - ranked[1][0] <= 1:
             return "mixed"
-        return ranked[0][1]
+        return cast(ChannelOrientation, ranked[0][1])
 
     if "distribution" in title or "marketing" in title:
         return "mixed"

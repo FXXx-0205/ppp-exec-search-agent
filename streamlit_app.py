@@ -14,8 +14,13 @@ if str(REPO_ROOT) not in sys.path:
 from app.config import settings
 from app.llm.anthropic_client import ClaudeClient
 from app.ppp import PPPTaskError, run_ppp_pipeline
-from app.ppp.role_spec import dump_role_spec_json, load_role_spec_file, load_role_spec_json_text, parse_role_spec_text
-from app.ppp.schema import PPPRunResult, PPPOutput
+from app.ppp.role_spec import (
+    dump_role_spec_json,
+    load_role_spec_file,
+    load_role_spec_json_text,
+    parse_role_spec_text,
+)
+from app.ppp.schema import PPPOutput, PPPRunResult
 
 APP_TITLE = "PPP Executive Search Agent"
 DEFAULT_MODEL = "claude-sonnet-4-5"

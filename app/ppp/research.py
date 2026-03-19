@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, Sequence, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -357,14 +357,16 @@ class TavilyResearchClient:
 
         status = str(identity_resolution.get("status", "not_verified"))
         rationale = str(identity_resolution.get("rationale", "")).strip()
+        raw_source_labels = identity_resolution.get("matched_source_labels", [])
         matched_source_labels = [
             str(label).strip()
-            for label in identity_resolution.get("matched_source_labels", [])
+            for label in cast(list[Any], raw_source_labels if isinstance(raw_source_labels, list) else [])
             if str(label).strip()
         ]
+        raw_possible_snippets = identity_resolution.get("possible_public_snippets", [])
         possible_snippets = [
             str(snippet).strip()
-            for snippet in identity_resolution.get("possible_public_snippets", [])
+            for snippet in cast(list[Any], raw_possible_snippets if isinstance(raw_possible_snippets, list) else [])
             if str(snippet).strip()
         ]
         if not snippets and possible_snippets:
@@ -446,7 +448,7 @@ class TavilyResearchClient:
             if analysis["exact_name"]:
                 analyses.append(analysis)
 
-        analyses.sort(key=lambda item: int(item["score"]), reverse=True)
+        analyses.sort(key=lambda item: cast(int, item["score"]), reverse=True)
 
         verified = [
             item

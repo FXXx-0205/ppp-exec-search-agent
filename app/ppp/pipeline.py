@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -207,7 +207,9 @@ def run_ppp_pipeline(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(output.model_dump(mode="json"), ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("PPP output written to %s", output_file)
-    delivery_status = "success" if not failed_candidates and not warnings and len(output_candidates) == len(candidates) else "partial_success"
+    delivery_status: Literal["success", "partial_success"] = (
+        "success" if not failed_candidates and not warnings and len(output_candidates) == len(candidates) else "partial_success"
+    )
     run_report_path = _write_run_report(
         failed_candidates=failed_candidates,
         warnings=warnings,

@@ -339,7 +339,11 @@ def _check_candidate(
                     "tenure_years is not grounded in a supported tenure claim and the narrative should signal uncertainty more clearly.",
                 )
             )
-        if enrichment.inferred_tenure_years is not None and abs(candidate.current_role.tenure_years - enrichment.inferred_tenure_years) > 0.25:
+        if (
+            candidate.current_role.tenure_years is not None
+            and enrichment.inferred_tenure_years is not None
+            and abs(candidate.current_role.tenure_years - enrichment.inferred_tenure_years) > 0.25
+        ):
             findings.append(
                 _error(
                     candidate.candidate_id,
@@ -559,7 +563,6 @@ def _check_recruiter_usefulness(
 ) -> list[QAFinding]:
     findings: list[QAFinding] = []
 
-    career_text = candidate.career_narrative.lower()
     if not _contains_lane_signal(candidate.career_narrative, enrichment):
         findings.append(
             _error(
