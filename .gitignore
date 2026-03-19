@@ -12,6 +12,12 @@ data/processed/projects/
 data/processed/runs/
 data/processed/snapshots/
 data/audit.jsonl
+data/ppp/intermediate/
+data/ppp/intermediate_realistic_public/
+data/ppp/uploaded_candidates.csv
+data/ppp/role_spec_ui.json
+data/ppp/candidates01.csv
+data/ppp/candidate02.csv
 *.sqlite3
 .env
 dist/
