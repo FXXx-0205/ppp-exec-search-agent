@@ -801,7 +801,7 @@ if generate_clicked:
         with st.spinner(spinner_text):
             temp_csv_path = save_uploaded_csv(uploaded_csv, DEFAULT_UPLOADED_CSV.parent)
             role_spec_path = persist_role_spec(role_spec)
-            if remember_keys:
+            if st.session_state.get("ppp_remember_api_keys", False):
                 _save_local_keys(api_key, tavily_api_key)
             try:
                 result = run_ppp_pipeline(
