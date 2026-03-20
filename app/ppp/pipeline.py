@@ -59,6 +59,9 @@ class PPPTaskError(Exception):
     pass
 
 
+RankingTier = Literal["strong_shortlist", "core_screen", "step_up_screen", "low_priority_map"]
+
+
 def _resolve_research_mode(research_mode: str | None) -> str:
     if research_mode is not None:
         return research_mode.strip().lower()
@@ -221,6 +224,7 @@ def run_ppp_pipeline(
             f"PPP export blocked: expected exactly 5 validated candidates, found {len(output_candidates)}. Review {run_report_path}."
         )
 
+    _apply_listwise_ranking(output_candidates, successful_enrichments)
     output = validate_output_payload({"candidates": [candidate.model_dump(mode="json") for candidate in output_candidates]})
     _ensure_export_ready_output(output)
     warnings: list[str] = []
@@ -654,6 +658,7 @@ def _gap_priority_pool(*, enrichment: CandidateEnrichmentResult, rank: int) -> l
     channel = signals.channel_orientation
     scope = signals.scope_signal
     seniority = signals.seniority_signal
+    mandate_similarity = signals.mandate_similarity
     pool: list[str] = []
 
     if channel == "institutional":
@@ -701,6 +706,13 @@ def _gap_priority_pool(*, enrichment: CandidateEnrichmentResult, rank: int) -> l
             ],
         ]
         pool.extend(mixed_rotations[(rank - 1) % len(mixed_rotations)])
+    else:
+        pool.extend(
+            [
+                "how much direct IFA and platform penetration sits behind the remit",
+                "how much direct institutional and super-fund coverage sits behind the remit",
+            ]
+        )
 
     if seniority == "head_level":
         pool.append("how hands-on the role remains versus broad strategic oversight")
@@ -711,6 +723,28 @@ def _gap_priority_pool(*, enrichment: CandidateEnrichmentResult, rank: int) -> l
         pool.append("whether the exposure is mainly ANZ, global, or local in practice")
     elif scope == "national":
         pool.append("whether the remit is genuinely national or concentrated in a narrower market segment")
+
+    if mandate_similarity == "step_up_candidate":
+        pool.extend(
+            [
+                "team leadership scale behind the remit",
+                "whether the remit is mainly hands-on channel ownership or broader strategic leadership",
+            ]
+        )
+    elif mandate_similarity == "adjacent_match":
+        pool.extend(
+            [
+                "product breadth across the current remit",
+                "whether the remit is genuinely national or concentrated in a narrower market segment",
+            ]
+        )
+    elif mandate_similarity == "direct_match":
+        pool.extend(
+            [
+                "how much direct IFA and platform penetration sits behind the remit",
+                "how much direct institutional and super-fund coverage sits behind the remit",
+            ]
+        )
 
     rotated_fallbacks = [
         "team leadership scale behind the remit",
@@ -814,6 +848,7 @@ def _safe_mobility_score(enrichment: CandidateEnrichmentResult) -> int:
 
 def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
     match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
     trajectory = _trajectory_signal_sentence(enrichment)
     # Important trust-calibration boundary: once the pipeline decides a current-profile
     # match is too weak to trust for precise tenure output, mobility copy must not reintroduce
@@ -821,11 +856,11 @@ def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
     # readiness wording aligned in the final exported artifact.
     if match_state == "no_reliable_match":
         sentence_one = trajectory or "Public chronology could not be validated against a reliable current-profile match."
-        sentence_two = _mobility_follow_up_sentence(match_state=match_state)
+        sentence_two = _mobility_follow_up_sentence(match_state=match_state, bucket=bucket)
         return polish_join(sentence_one, sentence_two)
     if match_state in {"likely_match", "partial_match"} and enrichment.inferred_tenure_years is None:
         sentence_one = trajectory or "Public chronology is only partially established, so current-role tenure should be treated as directional rather than locked."
-        sentence_two = _mobility_follow_up_sentence(match_state=match_state)
+        sentence_two = _mobility_follow_up_sentence(match_state=match_state, bucket=bucket)
         return polish_join(sentence_one, sentence_two)
     tenure = enrichment.inferred_tenure_years
     if tenure is not None:
@@ -834,39 +869,28 @@ def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
         sentence_one = "Fixture-backed run did not provide public chronology for the current role."
     else:
         sentence_one = "Live public-web research did not clearly establish public chronology for the current role."
-    sentence_two = _mobility_follow_up_sentence(match_state=match_state)
+    sentence_two = _mobility_follow_up_sentence(match_state=match_state, bucket=bucket)
     return polish_join(sentence_one, sentence_two)
 
 
 def _safe_role_fit_score(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> int:
-    score = candidate_brief.role_fit.score
-    signals = enrichment.recruiter_signals
     match_state = enrichment.normalized_evidence().match_confidence_state
-    bucket = _priority_bucket(enrichment=enrichment)
-    if bucket == "mapping_lead":
-        if match_state == "no_reliable_match":
-            return 2
-        if signals.mandate_similarity == "step_up_candidate":
-            return 4
-        return 3
-    if bucket == "credible_adjacent_screen":
-        if signals.seniority_signal == "head_level":
-            score = min(max(score, 5), 6)
-        elif signals.seniority_signal == "director_level":
-            score = min(max(score, 4), 5)
-        else:
-            score = min(max(score, 4), 4)
-        if signals.channel_orientation == "retail":
-            score = min(score, 5)
-        return score
+    tier = _ranking_tier(enrichment=enrichment)
+    objective_strength = _ranking_objective_strength(enrichment=enrichment)
 
-    # Shortlist-style targets should separate clearly from adjacent screens even when
-    # identity is still "likely" rather than fully verified.
-    if match_state == "verified_match" and signals.mandate_similarity == "direct_match":
-        return 8
-    if signals.channel_orientation == "wholesale":
-        return 8 if match_state == "verified_match" else 7
-    return 7
+    allowed_scores = _tier_score_band(tier)
+    score = float(allowed_scores[-1])
+    if len(allowed_scores) > 1 and objective_strength >= 0.85:
+        score = float(allowed_scores[0])
+    if match_state == "no_reliable_match":
+        score -= 0.5
+    elif match_state == "partial_match":
+        score -= 0.3
+
+    final_score = max(min(allowed_scores), min(max(allowed_scores), round(score)))
+    if _is_non_distribution_title(enrichment.current_title.lower()):
+        final_score = min(final_score, 3)
+    return final_score
 
 
 def _safe_role_fit_justification(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
@@ -874,13 +898,227 @@ def _safe_role_fit_justification(*, candidate_brief: CandidateBrief, enrichment:
     sentence_one = _soften_role_fit_chain(_role_fit_strength(enrichment=enrichment))
     sentence_two = _role_fit_gap(enrichment=enrichment)
     screening_question = signals.screening_priority_question.strip()
-    variants = [
-        f"The screening call should focus first on this point: {screening_question}",
-        f"The quickest diligence question is this: {screening_question}",
-        f"That is the first issue to pressure-test on a call: {screening_question}",
-    ]
-    sentence_three = choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, "screening_sentence")
+    bucket = _priority_bucket(enrichment=enrichment)
+    if bucket == "strong_shortlist":
+        variants = [
+            f"The first call should test this point first: {screening_question}",
+            f"The screening call should focus first on this point: {screening_question}",
+            f"That is the first issue to pressure-test on a call: {screening_question}",
+        ]
+    elif bucket == "credible_adjacent_screen":
+        variants = [
+            f"The first call should test transferability on this point: {screening_question}",
+            f"The screening call should focus first on this point: {screening_question}",
+            f"The screening call should focus first on this point: {screening_question}",
+        ]
+    else:
+        variants = [
+            f"Before this moves up the list, the first call should test one thing: {screening_question}",
+            f"The screening call should focus first on this point: {screening_question}",
+            f"The quickest diligence question is this: {screening_question}",
+        ]
+    sentence_three = choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, bucket, "screening_sentence")
     return polish_join(sentence_one, sentence_two, sentence_three)
+
+
+def _ranking_objective(enrichment: CandidateEnrichmentResult) -> float:
+    signals = enrichment.recruiter_signals
+    title = enrichment.current_title.lower()
+    seniority_signal = signals.seniority_signal
+    scope_signal = signals.scope_signal
+    mandate_type = signals.mandate_similarity
+    channel_orientation = signals.channel_orientation
+    identity_resolution = enrichment.identity_resolution.status
+    title_relevance = "distribution" in title or any(
+        term in title for term in ("sales", "bdm", "business development", "institutional", "wholesale", "wealth", "retail")
+    )
+    lane_score_map = {
+        "institutional": 1.0,
+        "wholesale": 1.0,
+        "mixed": 0.95,
+        "wealth": 0.75,
+        "retail": 0.7,
+        "unclear": 0.3,
+    }
+    scope_score_map = {
+        "national": 1.0,
+        "anz": 1.0,
+        "regional": 0.7,
+        "global": 0.7,
+        "unclear": 0.3,
+    }
+    mandate_score_map = {
+        "direct_match": 1.0,
+        "adjacent_match": 0.72,
+        "step_up_candidate": 0.35,
+        "unclear_fit": 0.1,
+    }
+    seniority_boost_map = {
+        "head_level": 0.25,
+        "director_level": 0.15,
+        "bdm_level": 0.05,
+        "unclear": 0.0,
+    }
+
+    relevance_score = (
+        5.0 * mandate_score_map.get(mandate_type, 0.1)
+        + 2.5 * lane_score_map.get(channel_orientation, 0.3)
+        + 1.5 * scope_score_map.get(scope_signal, 0.3)
+        + (0.75 if title_relevance else 0.0)
+    )
+    if mandate_type == "step_up_candidate":
+        relevance_score -= 0.4
+
+    confidence_adjustment = {
+        "verified_match": 0.3,
+        "likely_match": 0.1,
+        "possible_match": -0.2,
+        "not_verified": -1.0,
+    }.get(identity_resolution, -0.2)
+
+    return relevance_score + seniority_boost_map.get(seniority_signal, 0.0) + confidence_adjustment
+
+
+def _ranking_objective_strength(*, enrichment: CandidateEnrichmentResult) -> float:
+    return max(0.0, min(1.0, _ranking_objective(enrichment) / 10.0))
+
+
+def _debug_objective_breakdown(enrichment: CandidateEnrichmentResult) -> dict[str, object]:
+    title = enrichment.current_title.lower()
+    return {
+        "seniority": enrichment.recruiter_signals.seniority_signal,
+        "scope": enrichment.recruiter_signals.scope_signal,
+        "mandate": enrichment.recruiter_signals.mandate_similarity,
+        "title": "distribution" in title or any(
+            term in title for term in ("sales", "bdm", "business development", "institutional", "wholesale", "wealth", "retail")
+        ),
+        "identity": enrichment.identity_resolution.status,
+    }
+
+
+def _core_call_priority(enrichment: CandidateEnrichmentResult) -> tuple[int, int, int, int, int, int, float]:
+    signals = enrichment.recruiter_signals
+    lane_priority = {
+        "institutional": 4,
+        "wholesale": 4,
+        "wealth": 3,
+        "retail": 2,
+        "mixed": 1,
+        "unclear": 0,
+    }
+    scope_priority = {
+        "national": 3,
+        "anz": 3,
+        "regional": 2,
+        "global": 1,
+        "unclear": 0,
+    }
+    seniority_priority = {
+        "head_level": 2,
+        "director_level": 1,
+        "bdm_level": 0,
+        "unclear": 0,
+    }
+    confidence_priority = {
+        "verified_match": 2,
+        "likely_match": 1,
+        "possible_match": 0,
+        "not_verified": -1,
+    }
+    evidence_priority = {
+        "strong": 2,
+        "moderate": 1,
+        "thin": 0,
+    }
+    mandate_directness = 2 if signals.mandate_similarity == "direct_match" else 1
+    transferability = lane_priority.get(signals.channel_orientation, 0)
+    scope_usefulness = scope_priority.get(signals.scope_signal, 0)
+    leadership_relevance = seniority_priority.get(signals.seniority_signal, 0)
+    confidence = confidence_priority.get(enrichment.identity_resolution.status, -1)
+    evidence_strength = evidence_priority.get(signals.evidence_strength, 0)
+    residual_uncertainty_penalty = -min(len(signals.key_gaps), 3)
+    # Core-screen ranking is meant to answer "who gets the first screening call?"
+    # so direct channel transferability and usable scope outrank title seniority.
+    return (
+        mandate_directness,
+        transferability,
+        scope_usefulness,
+        leadership_relevance,
+        confidence,
+        evidence_strength,
+        float(residual_uncertainty_penalty),
+    )
+
+
+def _band_scores_for_group(*, group_size: int, band: list[int]) -> list[int]:
+    if group_size <= len(band):
+        return band[:group_size]
+    # Preserve distinct call-order signals at the front of the tier, then let
+    # the tail merge only after the high-priority calls are already separated.
+    return [*band, *([band[-1]] * (group_size - len(band)))]
+
+
+def _apply_listwise_ranking(
+    candidates: list[CandidateBrief],
+    enrichments_by_id: dict[str, CandidateEnrichmentResult],
+) -> None:
+    scored: list[tuple[CandidateBrief, RankingTier, float, CandidateEnrichmentResult]] = []
+    for candidate in candidates:
+        enrichment = enrichments_by_id[candidate.candidate_id]
+        scored.append((candidate, _ranking_tier(enrichment=enrichment), _ranking_objective(enrichment), enrichment))
+
+    scored.sort(
+        key=lambda item: (_tier_rank(item[1]), -item[2], item[0].candidate_id),
+    )
+    grouped_by_tier: dict[RankingTier, list[tuple[CandidateBrief, float, CandidateEnrichmentResult]]] = {
+        "strong_shortlist": [],
+        "core_screen": [],
+        "step_up_screen": [],
+        "low_priority_map": [],
+    }
+    for candidate, tier, objective, enrichment in scored:
+        grouped_by_tier[tier].append((candidate, objective, enrichment))
+
+    ranked_candidates: list[CandidateBrief] = []
+    for tier in ("strong_shortlist", "core_screen", "step_up_screen", "low_priority_map"):
+        tier_group = grouped_by_tier[tier]
+        if tier == "core_screen":
+            tier_group.sort(
+                key=lambda item: tuple(-value for value in _core_call_priority(item[2])) + (-item[1], item[0].candidate_id)
+            )
+        else:
+            tier_group.sort(key=lambda item: (-item[1], item[0].candidate_id))
+        band = _tier_score_band(tier)
+        assigned_scores = _band_scores_for_group(group_size=len(tier_group), band=band)
+        for assigned_score, (candidate, _objective, _enrichment) in zip(assigned_scores, tier_group):
+            candidate.role_fit = candidate.role_fit.model_copy(update={"score": assigned_score})
+            ranked_candidates.append(candidate)
+
+    candidates[:] = ranked_candidates
+    _apply_seniority_priority(scored)
+    _enforce_seniority_anti_tie(candidates, enrichments_by_id, {})
+
+
+def _apply_seniority_priority(
+    scored: list[tuple[CandidateBrief, RankingTier, float, CandidateEnrichmentResult]],
+) -> list[tuple[CandidateBrief, RankingTier, float, CandidateEnrichmentResult]]:
+    # Seniority no longer does a global reorder. We keep the helper as a no-op
+    # to minimize call-site churn and preserve the old extension point.
+    return scored
+
+
+def _enforce_seniority_anti_tie(
+    candidates: list[CandidateBrief],
+    enrichments_by_id: dict[str, CandidateEnrichmentResult],
+    assigned_by_candidate_id: dict[str, int],
+) -> None:
+    # Cross-tier separation is now enforced by tier -> score-band mapping, so
+    # post-hoc pairwise score edits are intentionally disabled.
+    return
+
+
+def _listwise_allowed_scores(*, enrichment: CandidateEnrichmentResult) -> list[int]:
+    return _tier_score_band(_ranking_tier(enrichment=enrichment))
 
 
 def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
@@ -890,32 +1128,44 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
     first_name = _first_name(candidate_brief.full_name)
     match_state = enrichment.normalized_evidence().match_confidence_state
     bucket = _priority_bucket(enrichment=enrichment)
+    primary_gap = _strip_gap_qualifier(enrichment.recruiter_signals.key_gaps[0]) if enrichment.recruiter_signals.key_gaps else "scope depth"
+    hook_gap = primary_gap
+    lowered_angle = angle.lower()
+    lowered_gap = primary_gap.lower()
+    if "team" in lowered_angle and "team leadership scale" in lowered_gap:
+        hook_gap = "role depth"
+    elif "institutional and super-fund coverage" in lowered_angle and "institutional and super-fund" in lowered_gap:
+        hook_gap = "coverage depth"
+    elif "ifa and platform coverage" in lowered_angle and "ifa and platform" in lowered_gap:
+        hook_gap = "coverage depth"
+    elif "broader product set" in lowered_angle and "product breadth" in lowered_gap:
+        hook_gap = "product breadth"
     if match_state == "no_reliable_match":
         exploratory_bucket = [
-            f"Hi {first_name}, we're mapping a distribution brief and wanted to sense-check whether your remit at {employer} genuinely covers {angle}.",
-            f"Hi {first_name}, we're keeping a market map around a distribution search and wanted to confirm whether your role at {employer} really includes {angle}.",
-            f"Hi {first_name}, one of our distribution briefs has some adjacency to your remit at {employer}, and I wanted to check how much it really reaches into {angle}.",
+            f"Hi {first_name}, I'm working on a distribution brief and wanted to sense-check whether your remit at {employer} genuinely reaches into {angle}, especially around {hook_gap}.",
+            f"Hi {first_name}, I wanted to confirm whether your role at {employer} really includes {angle} rather than a narrower remit for a distribution brief, particularly on {hook_gap}.",
+            f"Hi {first_name}, your remit at {employer} looked directionally relevant to a distribution brief, and I wanted to check how much it really reaches into {angle}, especially where {hook_gap} is concerned.",
         ]
         return choose_variant(exploratory_bucket, candidate_brief.full_name, employer, angle, "not_verified")
     if bucket == "strong_shortlist":
         shortlist_bucket = [
-            f"Hi {first_name}, we're already prioritising a small shortlist for a senior distribution mandate, and your remit at {employer} looks firmly in range, especially around {angle}; open to a brief conversation?",
-            f"Hi {first_name}, we're moving quickly on a Head of Distribution search and your current remit at {employer} looks close enough to warrant an early call, particularly around {angle}.",
-            f"Hi {first_name}, your work at {employer} reads like one of the more relevant profiles on our distribution shortlist, especially where it touches {angle}; would a quick intro be worthwhile?",
+            f"Hi {first_name}, I'm working on a senior distribution mandate, and your remit at {employer} looks firmly in range, especially around {angle} with {hook_gap} as the main diligence point.",
+            f"Hi {first_name}, your current remit at {employer} looks close to a Head of Distribution brief, particularly around {angle}, and the main thing I'd want to test is {hook_gap}.",
+            f"Hi {first_name}, your work at {employer} looks highly relevant to a senior distribution search, especially where it touches {angle}; the main point I'd want to test is {hook_gap}.",
         ]
         return choose_variant(shortlist_bucket, candidate_brief.full_name, employer, angle, "strong_shortlist")
     if bucket == "credible_adjacent_screen":
         if signals.mandate_similarity == "step_up_candidate":
             step_up_bucket = [
-                f"Hi {first_name}, we're mapping a senior distribution mandate and your remit at {employer} looks like a genuine step-up conversation, especially around {angle}.",
-                f"Hi {first_name}, your work at {employer} is not a straight replica of our brief, but it does look like the kind of stretch profile worth testing, particularly around {angle}.",
-                f"Hi {first_name}, we're speaking with a few progression-style candidates for a broader distribution brief, and your remit at {employer} stands out as a plausible step-up conversation, especially around {angle}.",
+                f"Hi {first_name}, I'm working on a senior distribution mandate and your remit at {employer} looks worth testing as a plausible progression from the current remit, especially around {angle}, with {hook_gap} the first thing I'd want to explore.",
+                f"Hi {first_name}, your work at {employer} is not a straight replica of our brief, but it does look like the kind of profile worth testing for a broader role, particularly around {angle} if {hook_gap} checks out.",
+                f"Hi {first_name}, your remit at {employer} stands out as a plausible stretch toward a broader distribution brief, especially around {angle} and {hook_gap}.",
             ]
             return choose_variant(step_up_bucket, candidate_brief.full_name, employer, angle, "step_up_bucket")
         adjacent_bucket = [
-            f"Hi {first_name}, we're screening a handful of adjacent distribution profiles and your remit at {employer} looks worth pressure-testing, especially around {angle}.",
-            f"Hi {first_name}, your coverage at {employer} is not a straight title match to our brief, but there is enough overlap around {angle} to justify a quick screening conversation.",
-            f"Hi {first_name}, we're speaking with a few adjacent candidates for a senior distribution role, and your remit at {employer} looks commercially relevant, especially around {angle}; open to a brief chat?",
+            f"Hi {first_name}, your remit at {employer} looks worth pressure-testing against a senior distribution brief, especially around {angle}, with {hook_gap} as the main gap.",
+            f"Hi {first_name}, your coverage at {employer} is not a straight title match to the brief, but there is enough overlap around {angle} to justify a quick conversation, particularly if {hook_gap} proves stronger than it first reads.",
+            f"Hi {first_name}, your remit at {employer} looks commercially relevant to a senior distribution role, especially around {angle}; the first thing I'd want to test is {hook_gap}.",
         ]
         return choose_variant(adjacent_bucket, candidate_brief.full_name, employer, angle, "credible_adjacent_screen")
     if match_state in {"likely_match", "partial_match"}:
@@ -1232,6 +1482,7 @@ def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnr
     title = _sentence_safe_title(enrichment.current_title)
     employer = enrichment.current_employer
     match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
     if match_state == "no_reliable_match":
         variants = [
             f"Task input lists {candidate_brief.full_name} as {title} at {employer}, but the current-profile match remains unreliable in public evidence.",
@@ -1259,6 +1510,22 @@ def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnr
                 f"Public evidence does not yet establish a clear distribution lane, and {scope} with {seniority} should be treated cautiously."
             )
         return f"{candidate_brief.full_name} is currently {title} at {employer}, with a broad distribution remit signalled at {scope} and {seniority}."
+    if bucket == "strong_shortlist":
+        lane = _lane_phrase(signals.channel_orientation)
+        variants = [
+            f"{candidate_brief.full_name} reads as a credible {title} at {employer}, with public evidence pointing to {lane}, plus {scope} and {seniority}.",
+            f"Public evidence places {candidate_brief.full_name} close to the core brief at {employer} as {title}, with {lane}, {scope}, and {seniority} visible in the remit.",
+            f"{candidate_brief.full_name} looks like a high-relevance {title} profile at {employer}, with {lane}, {scope}, and {seniority} signalled in the public record.",
+        ]
+        return choose_variant(variants, candidate_brief.full_name, employer, title, bucket, "career_bucket_opening")
+    if bucket == "credible_adjacent_screen":
+        lane = _lane_phrase(signals.channel_orientation)
+        variants = [
+            f"Public evidence places {candidate_brief.full_name} in a commercially adjacent {title} remit at {employer}, with public signals pointing to {lane}, plus {scope} and {seniority}.",
+            f"{candidate_brief.full_name} appears to sit in a relevant but not like-for-like {title} role at {employer}, with {lane}, {scope}, and {seniority} visible in the public record.",
+            f"The visible remit for {candidate_brief.full_name} at {employer} reads as a plausible adjacent screen, with {lane}, {scope}, and {seniority} attached to the title {title}.",
+        ]
+        return choose_variant(variants, candidate_brief.full_name, employer, title, bucket, "career_bucket_opening")
     if signals.seniority_signal == "head_level":
         return f"{candidate_brief.full_name} holds {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} signalled by the title {title}."
     if signals.scope_signal in {"anz", "global", "regional"}:
@@ -1289,16 +1556,16 @@ def _career_relevance(*, candidate_brief: CandidateBrief, enrichment: CandidateE
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "possible_relevance")
     if bucket == "strong_shortlist":
         variants = [
-            f"This should sit in the early-call shortlist because {sell_points}; the diligence point is remit depth rather than basic relevance.",
-            f"This reads more like a first-wave call than a mapping name because {sell_points}; the remaining work is to test scope depth, not lane fit.",
-            f"This looks actionable for shortlist discussion because {sell_points}; the real question is how deep the remit runs rather than whether the lane is relevant.",
+            f"This should sit in the early-call shortlist because {sell_points}; the diligence work is around remit depth rather than basic lane fit.",
+            f"This reads more like a first-wave call than a mapping name because {sell_points}; the remaining question is how broad the remit really is, not whether it belongs in the lane.",
+            f"This looks actionable for shortlist discussion because {sell_points}; the live call should test scope depth rather than starting from relevance.",
         ]
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "strong_shortlist_relevance")
     if bucket == "credible_adjacent_screen":
         variants = [
-            f"This is better treated as an adjacent screen than a first-wave shortlist name because {sell_points}; the overlap is real, but the transferability still needs pressure-testing.",
-            f"This belongs in the adjacent-screen bucket rather than the first shortlist cut because {sell_points}; there is enough overlap to test, but not enough to assume transferability.",
-            f"This looks directionally relevant enough for a screening call because {sell_points}, even if it still sits a step away from a clean shortlist profile.",
+            f"This is better treated as an adjacent screen than a first-wave shortlist name because {sell_points}; the overlap is real, but the transfer still has to be proven live.",
+            f"This belongs in the adjacent-screen bucket rather than the first shortlist cut because {sell_points}; there is enough overlap to test, but not enough to assume a clean move across.",
+            f"This looks relevant enough for a screening call because {sell_points}, even if it still sits one commercial step away from a clean shortlist profile.",
         ]
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "adjacent_screen_relevance")
     if match_state == "likely_match":
@@ -1327,11 +1594,21 @@ def _role_fit_strength(*, enrichment: CandidateEnrichmentResult) -> str:
     match_state = enrichment.normalized_evidence().match_confidence_state
     bucket = _priority_bucket(enrichment=enrichment)
     if match_state == "no_reliable_match":
-        return f"Lower-priority mapping lead; the task input suggests commercially relevant {lane_scope or 'distribution'} exposure at {employer}, but the current-profile match is still unreliable."
+        return f"The task input suggests commercially relevant {lane_scope or 'distribution'} exposure at {employer}, but the current-profile match is still too unreliable to treat as a priority call."
     if bucket == "strong_shortlist":
-        return f"Shortlist-style target; {title} at {employer} brings one of the cleaner overlaps with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}."
+        variants = [
+            f"{title} at {employer} brings one of the cleaner overlaps with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}.",
+            f"{title} at {employer} carries one of the stronger visible overlaps with the brief, particularly around {lane_scope or 'distribution'}, and {sell_points}.",
+            f"{title} at {employer} sits close to the mandate on visible evidence, especially around {lane_scope or 'distribution'}, and {sell_points}.",
+        ]
+        return choose_variant(variants, enrichment.full_name, employer, bucket, "role_fit_strength")
     if bucket == "credible_adjacent_screen":
-        return f"Adjacent screen rather than first-wave shortlist; {title} at {employer} brings useful overlap with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}."
+        variants = [
+            f"{title} at {employer} brings useful overlap with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}, even if the move still needs testing.",
+            f"{title} at {employer} brings relevant overlap with the brief, particularly around {lane_scope or 'distribution'}, and {sell_points}, though the transfer case is not fully de-risked.",
+            f"{title} at {employer} looks commercially relevant to the brief, especially around {lane_scope or 'distribution'}, and {sell_points}, but it still reads as a prove-it call.",
+        ]
+        return choose_variant(variants, enrichment.full_name, employer, bucket, "role_fit_strength")
     if match_state == "partial_match":
         return f"Worth a screening call; {title} at {employer} may bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}, even though the profile match is only partial."
     if match_state == "likely_match":
@@ -1341,38 +1618,91 @@ def _role_fit_strength(*, enrichment: CandidateEnrichmentResult) -> str:
     if signals.mandate_similarity == "adjacent_match":
         return f"Adjacent but credible target; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if signals.mandate_similarity == "step_up_candidate":
-        return f"Adjacent step-up conversation; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
+        return f"{title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}, but the role still reads more like a stretch into broader distribution leadership than a de-risked match."
     if _is_non_distribution_title(enrichment.current_title.lower()):
-        return f"Market map only; {title} at {employer} points more to investment-platform exposure than to a verified client-facing commercial remit."
-    return f"Possible match pending verification; {title} at {employer} leaves the distribution relevance only partially established, although {sell_points}."
+        return f"{title} at {employer} points more to investment-platform exposure than to a verified client-facing commercial remit."
+    return f"{title} at {employer} leaves the distribution relevance only partially established, although {sell_points}, and still needs verification before it can be prioritised confidently."
 
 
 def _priority_bucket(*, enrichment: CandidateEnrichmentResult) -> str:
-    # Internal recruiter-priority bucket used to separate shortlist, adjacent screen,
-    # and mapping profiles without changing the PPP output schema.
+    tier = _ranking_tier(enrichment=enrichment)
+    if tier == "strong_shortlist":
+        return "strong_shortlist"
+    if tier in {"core_screen", "step_up_screen"}:
+        return "credible_adjacent_screen"
+    return "mapping_lead"
+
+
+def _ranking_tier(*, enrichment: CandidateEnrichmentResult) -> RankingTier:
+    # The ranking decision is now made once at the tier layer, then refined only
+    # within the tier. This keeps mandate relevance as the primary decision source.
     signals = enrichment.recruiter_signals
     match_state = enrichment.normalized_evidence().match_confidence_state
     title = enrichment.current_title.lower()
 
     if match_state == "no_reliable_match" or signals.mandate_similarity == "unclear_fit":
-        return "mapping_lead"
+        return "low_priority_map"
     if _is_non_distribution_title(title):
-        return "mapping_lead"
+        return "low_priority_map"
 
     has_head_distribution_title = "head of distribution" in title
-    head_like_scope = signals.seniority_signal == "head_level" and signals.scope_signal in {"national", "anz", "regional", "global"}
+    commercially_relevant_lane = signals.channel_orientation in {"institutional", "wholesale", "wealth", "mixed", "retail"}
+    clean_mandate_lane = signals.channel_orientation in {"institutional", "wholesale", "wealth", "retail"}
+    non_trivial_scope = signals.scope_signal in {"national", "anz", "regional", "global"}
+    shortlist_ready = commercially_relevant_lane and non_trivial_scope
+    reliable_match = match_state in {"verified_match", "likely_match", "partial_match"}
+    clean_shortlist_match = match_state in {"verified_match", "likely_match"}
 
+    if signals.mandate_similarity == "step_up_candidate":
+        if not commercially_relevant_lane or not reliable_match:
+            return "low_priority_map"
+        if signals.seniority_signal == "head_level":
+            return "step_up_screen"
+        if non_trivial_scope or signals.seniority_signal in {"director_level", "bdm_level"}:
+            return "step_up_screen"
+        return "low_priority_map"
+
+    # Strong shortlist is reserved for first-wave calls where mandate fit is
+    # already clear from public evidence. Seniority and title can reinforce a
+    # clean fit, but they are not themselves an entry ticket.
     if (
         signals.mandate_similarity == "direct_match"
-        or (has_head_distribution_title and head_like_scope and match_state in {"verified_match", "likely_match", "partial_match"})
-        or (signals.channel_orientation == "wholesale" and head_like_scope and signals.mandate_similarity == "adjacent_match")
+        and non_trivial_scope
+        and clean_shortlist_match
+        and (clean_mandate_lane or has_head_distribution_title)
     ):
         return "strong_shortlist"
 
-    if signals.mandate_similarity in {"adjacent_match", "step_up_candidate"}:
-        return "credible_adjacent_screen"
+    # Direct or adjacent profiles with real commercial screening value still
+    # belong in core, especially when the title looks strong but the lane fit is
+    # broader, mixed, or only partially established.
+    if signals.mandate_similarity == "direct_match" and shortlist_ready:
+        return "core_screen"
 
-    return "mapping_lead"
+    if signals.mandate_similarity == "adjacent_match" and commercially_relevant_lane:
+        if non_trivial_scope or signals.seniority_signal in {"head_level", "director_level"}:
+            return "core_screen"
+        return "step_up_screen"
+
+    return "low_priority_map"
+
+
+def _tier_rank(tier: RankingTier) -> int:
+    return {
+        "strong_shortlist": 0,
+        "core_screen": 1,
+        "step_up_screen": 2,
+        "low_priority_map": 3,
+    }[tier]
+
+
+def _tier_score_band(tier: RankingTier) -> list[int]:
+    return {
+        "strong_shortlist": [9, 8],
+        "core_screen": [7, 6, 5],
+        "step_up_screen": [4, 3],
+        "low_priority_map": [2, 1],
+    }[tier]
 
 
 def _role_fit_gap(*, enrichment: CandidateEnrichmentResult) -> str:
@@ -1591,31 +1921,60 @@ def _role_gap_sentence(gaps: list[str]) -> str:
     return choose_variant(variants, primary_gap, secondary_gap, "multi_role_gap")
 
 
-def _mobility_follow_up_sentence(*, match_state: str) -> str:
+def _mobility_follow_up_sentence(*, match_state: str, bucket: str) -> str:
     variants = {
-        "no_reliable_match": [
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach framed as exploratory rather than timely.",
+        ("no_reliable_match", "mapping_lead"): [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before this moves beyond market mapping.",
             "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, not inferred from the task input alone.",
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any priority call is assumed.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any market-map name is treated as more than exploratory.",
         ],
-        "partial_match": [
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, even if the commercial overlap looks usable.",
+        ("partial_match", "credible_adjacent_screen"): [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation while the transfer case is still being tested.",
             "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from partial chronology.",
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation once profile certainty is tightened.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before the adjacent case is pushed too hard.",
         ],
-        "likely_match": [
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than assumed from tenure alone.",
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even where chronology looks directionally solid.",
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before call priority is calibrated too tightly.",
+        ("likely_match", "strong_shortlist"): [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; the practical read is early-priority because fit is strong, not because tenure itself implies readiness.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; the call belongs high in the stack on relevance grounds, not as a tenure-based assumption.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; outreach priority here comes from remit relevance rather than a presumed timing signal.",
         ],
-        "verified_match": [
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from a settled remit.",
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even though the role chronology is clearer.",
-            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation instead of being read off tenure alone.",
+        ("verified_match", "strong_shortlist"): [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; the practical read is early-priority because role relevance is high, not because chronology itself implies readiness.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; outreach should be prioritised on fit rather than any assumption drawn from tenure alone.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; chronology helps frame the call, but it should not be mistaken for move intent.",
+        ],
+        ("verified_match", "credible_adjacent_screen"): [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach framed as a calibration call rather than a presumed move.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even where chronology is cleaner.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before the candidate is read as actively movable.",
         ],
     }
-    bucket = variants.get(match_state, variants["likely_match"])
-    return choose_variant(bucket, match_state, "mobility_follow_up")
+    bucket_variants = variants.get((match_state, bucket))
+    if bucket_variants is None:
+        fallback = {
+            "no_reliable_match": [
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any priority call is assumed.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from a weak public match.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before timing is read into the profile.",
+            ],
+            "partial_match": [
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation once profile certainty is tightened.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from partial evidence.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before the profile is treated as truly actionable.",
+            ],
+            "likely_match": [
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than assumed from tenure alone.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even where chronology looks directionally solid.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before outreach timing is calibrated too tightly.",
+            ],
+            "verified_match": [
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation instead of being read off tenure alone.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even where the chronology is cleaner.",
+                "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any settled-remit assumption is made.",
+            ],
+        }
+        bucket_variants = fallback.get(match_state, fallback["likely_match"])
+    return choose_variant(bucket_variants, match_state, bucket, "mobility_follow_up")
 
 
 def _soften_role_fit_chain(text: str) -> str:
@@ -1691,6 +2050,8 @@ def _screening_question_from_gaps(gaps: list[str]) -> str:
         return "How hands-on is the remit today versus broader strategic oversight?"
     if "team leadership scale" in lowered:
         return "What size team has this role actually led?"
+    if "broader strategic leadership" in lowered:
+        return "Is the remit still mainly hands-on channel ownership, or does it already include broader strategic leadership responsibility?"
     if "anz, global, or local in practice" in lowered or "anz vs global vs local exposure" in lowered:
         return "Is the remit genuinely ANZ in practice, or more global or local than the title suggests?"
     if "narrower market segment" in lowered:

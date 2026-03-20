@@ -1,6 +1,35 @@
 {
   "candidates": [
     {
+      "candidate_id": "candidate_4",
+      "full_name": "Deborah Southon",
+      "current_role": {
+        "title": "Head of Distribution",
+        "employer": "Challenger Limited",
+        "tenure_years": 4.5
+      },
+      "career_narrative": "Public evidence most likely places Deborah Southon in the Head of Distribution remit at Challenger Limited, with reported national-scope cues and head-level seniority already visible. This is better treated as an adjacent screen than a first-wave shortlist name because the remit already sits in wholesale distribution leadership, and the visible remit reads as national in scope; the overlap is real, but the transfer still has to be proven live. The initial screening focus should be how much direct IFA and platform penetration sits behind the remit, with team leadership scale behind the remit as the next point that still needs confirmation.",
+      "experience_tags": [
+        "wholesale distribution leadership",
+        "national scope",
+        "financial services platform",
+        "retirement and investment products",
+        "intermediary channel management",
+        "head-level tenure"
+      ],
+      "firm_aum_context": "Challenger Limited appears to be an established Australian financial-services platform with a clear market footprint. The remit is closer to intermediary and wholesale distribution than to a pure institutional coverage role. Based on firm type and sector context, exact AUM is unavailable here, so the better recruiter read is firm type, market position, and channel context.",
+      "mobility_signal": {
+        "score": 4,
+        "rationale": "Public chronology suggests roughly 4.6 years in the current role, so the visible remit looks more established than newly stepped into. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before outreach timing is calibrated too tightly."
+      },
+      "role_fit": {
+        "role": "Head of Distribution / National BDM",
+        "score": 7,
+        "justification": "Head of Distribution at Challenger Limited brings useful overlap with the brief, especially around national wholesale coverage; the remit already sits in wholesale distribution leadership; the visible remit reads as national in scope, even if the move still needs testing. The main fit gap is how much direct IFA and platform penetration sits behind the remit; team leadership scale behind the remit also remains to be tested. The screening call should focus first on this point: How much direct IFA and platform penetration sits behind the remit today?"
+      },
+      "outreach_hook": "Hi Deborah, your coverage at Challenger Limited is not a straight title match to the brief, but there is enough overlap around national intermediary coverage with leadership scale to justify a quick conversation, particularly if how much direct IFA and platform penetration sits behind the remit proves stronger than it first reads."
+    },
+    {
       "candidate_id": "candidate_1",
       "full_name": "Andrew Swan",
       "current_role": {
@@ -8,55 +37,26 @@
         "employer": "Pendal Group",
         "tenure_years": 3.0
       },
-      "career_narrative": "Andrew Swan reads as a likely current Head of Distribution at Pendal Group, with public signals pointing to reported national-scope cues and head-level seniority. This reads more like a first-wave call than a mapping name because the remit already sits at broad distribution-leadership level, and the visible remit reads as national in scope; the remaining work is to test scope depth, not lane fit. The initial screening focus should be whether the remit is mainly hands-on channel ownership or broader strategic leadership, with product breadth across the current remit as the next point that still needs confirmation.",
+      "career_narrative": "Andrew Swan reads as a likely current Head of Distribution at Pendal Group, with public signals pointing to reported national-scope cues and head-level seniority. This belongs in the adjacent-screen bucket rather than the first shortlist cut because the remit already sits at broad distribution-leadership level, and the visible remit reads as national in scope; there is enough overlap to test, but not enough to assume a clean move across. The initial screening focus should be whether the remit is mainly hands-on channel ownership or broader strategic leadership, with product breadth across the current remit as the next point that still needs confirmation.",
       "experience_tags": [
         "head of distribution",
-        "wholesale distribution",
-        "institutional distribution",
-        "national scope australia",
-        "active management",
-        "channel strategy leadership"
+        "australian active manager",
+        "national scope",
+        "mixed wholesale and institutional channels",
+        "channel strategy ownership",
+        "pendal group"
       ],
       "firm_aum_context": "Pendal Group looks like an established Australian active manager with visible market scale in Australian funds management. The visible channel context spans multiple distribution lanes, which is useful for a broad head-of-distribution mandate. Exact AUM is unavailable here; the useful takeaway is firm profile, market position, and channel mix rather than a precise figure.",
       "mobility_signal": {
         "score": 3,
-        "rationale": "Public chronology points to about 2.8 years in seat, with national scope and head-level seniority already visible in the public record. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and tested in conversation; the practical outreach read is early-priority because role relevance is high, not because tenure itself implies readiness."
-      },
-      "role_fit": {
-        "role": "Head of Distribution / National BDM",
-        "score": 7,
-        "justification": "First-wave shortlist target; compared with others in this slate, Head of Distribution at Pendal Group sits closer to immediate call priority because it brings one of the cleaner overlaps with the brief, especially around national multi-channel coverage; the remit already sits at broad distribution-leadership level; the visible remit reads as national in scope. The main fit gap is whether the remit is mainly hands-on channel ownership or broader strategic leadership; product breadth across the current remit also remains to be tested. The screening call should focus first on this point: Has the remit been mainly hands-on channel ownership, or does it already carry broader strategic leadership responsibility?"
-      },
-      "outreach_hook": "Hi Andrew, we're already prioritising a small shortlist for a senior distribution mandate, and your remit at Pendal Group looks firmly in range, especially around national senior multi-channel distribution exposure; open to a brief conversation?"
-    },
-    {
-      "candidate_id": "candidate_2",
-      "full_name": "Cathy Hales",
-      "current_role": {
-        "title": "Head of Retail Sales",
-        "employer": "Perpetual Limited",
-        "tenure_years": 4.1
-      },
-      "career_narrative": "Cathy Hales holds a mixed distribution lane at Perpetual Limited, with regional scope and head-level seniority signalled by the title Head of Retail Sales. This looks directionally relevant enough for a screening call because the remit already sits at broad distribution-leadership level, and the visible remit reads as regional in scope, even if it still sits a step away from a clean shortlist profile. The main point to test on a first call is team leadership scale behind the remit; whether the exposure is mainly ANZ, global, or local in practice also still needs confirmation.",
-      "experience_tags": [
-        "retail distribution leadership",
-        "adviser and platform channel management",
-        "wholesale distribution exposure",
-        "national sales remit (australia)",
-        "perpetual limited platform experience",
-        "commercially hands-on leadership"
-      ],
-      "firm_aum_context": "Perpetual Limited looks like an established diversified funds-management platform with identifiable market relevance in funds management. The remit appears to cut across more than one distribution lane, which matters for a broad commercial brief. Exact AUM is unavailable here; the useful takeaway is firm profile, market position, and channel mix rather than a precise figure.",
-      "mobility_signal": {
-        "score": 4,
-        "rationale": "Public chronology suggests approximately 4.1 years in the current role, which reads as an established regional scope remit at head-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and tested in conversation, with outreach framed as a calibration call because the fit still needs pressure-testing."
+        "rationale": "Public chronology points to about 2.8 years in seat, with national scope and head-level seniority already visible in the public record. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before outreach timing is calibrated too tightly."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
         "score": 6,
-        "justification": "Credible adjacent screen; compared with others in this slate, Head of Retail Sales at Perpetual Limited sits closer to active screening than to first-wave shortlist because it brings useful overlap with the brief, especially around regional multi-channel coverage; the remit already sits at broad distribution-leadership level; the visible remit reads as regional in scope. The biggest diligence gap is team leadership scale behind the remit; whether the exposure is mainly ANZ, global, or local in practice should be checked alongside it. The quickest diligence question is this: What size team has this role actually led?"
+        "justification": "Head of Distribution at Pendal Group brings relevant overlap with the brief, particularly around national multi-channel coverage; the remit already sits at broad distribution-leadership level; the visible remit reads as national in scope, though the transfer case is not fully de-risked. The main fit gap is whether the remit is mainly hands-on channel ownership or broader strategic leadership; product breadth across the current remit also remains to be tested. The screening call should focus first on this point: Has the remit been mainly hands-on channel ownership, or does it already carry broader strategic leadership responsibility?"
       },
-      "outreach_hook": "Hi Cathy, your coverage at Perpetual Limited is not a straight title match to our brief, but there is enough overlap around regional senior distribution exposure with team scale to justify a quick screening conversation."
+      "outreach_hook": "Hi Andrew, your remit at Pendal Group looks worth pressure-testing against a senior distribution brief, especially around national senior multi-channel distribution exposure, with whether the remit is mainly hands-on channel ownership or broader strategic leadership as the main gap."
     },
     {
       "candidate_id": "candidate_3",
@@ -66,53 +66,56 @@
         "employer": "Fidelity International",
         "tenure_years": 1.9
       },
-      "career_narrative": "Public evidence places Jason Ennis in a mixed distribution lane at Fidelity International, with ANZ scope and director-level seniority attached to the remit. This belongs in the adjacent-screen bucket rather than the first shortlist cut because the current role is senior enough to sit credibly in the frame, and public evidence points to ANZ scope; there is enough overlap to test, but not enough to assume transferability. The first diligence point is product breadth across the current remit; whether the remit is genuinely national or concentrated in a narrower market segment should be confirmed in conversation straight after that.",
+      "career_narrative": "Jason Ennis appears to sit in a relevant but not like-for-like Director, Inst Sales role at Fidelity International, with a mixed distribution lane, ANZ scope, and director-level seniority visible in the public record. This belongs in the adjacent-screen bucket rather than the first shortlist cut because the current role is senior enough to sit credibly in the frame, and public evidence points to ANZ scope; there is enough overlap to test, but not enough to assume a clean move across. The first diligence point is product breadth across the current remit; whether the remit is genuinely national or concentrated in a narrower market segment should be confirmed in conversation straight after that.",
       "experience_tags": [
         "institutional sales",
-        "anz allocator coverage",
-        "consultant relations",
-        "global asset manager",
-        "director-level commercial role"
+        "allocator coverage",
+        "consultant relationships",
+        "anz scope",
+        "global asset manager platform"
       ],
       "firm_aum_context": "Fidelity International reads as a large global asset manager with obvious institutional credibility in market. The visible channel context spans multiple distribution lanes, which is useful for a broad head-of-distribution mandate. Firm profile indicates useful market context here even though exact AUM is unavailable, so the note stays qualitative.",
       "mobility_signal": {
         "score": 3,
-        "rationale": "Public chronology points to about 1.9 years in seat, with ANZ scope and director-level seniority already visible in the public record. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation; the practical read is calibration-style outreach rather than an urgent pull-forward."
+        "rationale": "Public chronology points to about 1.9 years in seat, with ANZ scope and director-level seniority already visible in the public record. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach framed as a calibration call rather than a presumed move."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
         "score": 5,
-        "justification": "Credible adjacent screen; compared with others in this slate, Director, Inst Sales at Fidelity International sits closer to active screening than to first-wave shortlist because it brings useful overlap with the brief, especially around ANZ multi-channel coverage; the current role is senior enough to sit credibly in the frame; public evidence points to ANZ scope. The unresolved commercial issue is product breadth across the current remit, with whether the remit is genuinely national or concentrated in a narrower market segment as the next point to test. That is the first issue to pressure-test on a call: How broad is the product set behind the current remit?"
+        "justification": "Director, Inst Sales at Fidelity International brings relevant overlap with the brief, particularly around ANZ multi-channel coverage; the current role is senior enough to sit credibly in the frame; public evidence points to ANZ scope, though the transfer case is not fully de-risked. The unresolved commercial issue is product breadth across the current remit, with whether the remit is genuinely national or concentrated in a narrower market segment as the next point to test. The screening call should focus first on this point: How broad is the product set behind the current remit?"
       },
-      "outreach_hook": "Hi Jason, we're screening a handful of adjacent distribution profiles and your remit at Fidelity International looks worth pressure-testing, especially around ANZ senior distribution exposure across a broader product set."
+      "outreach_hook": "Hi Jason, your remit at Fidelity International looks worth pressure-testing against a senior distribution brief, especially around ANZ senior distribution exposure across a broader product set, with product breadth as the main gap."
     },
     {
-      "candidate_id": "candidate_4",
-      "full_name": "Deborah Southon",
+      "candidate_id": "candidate_2",
+      "full_name": "Cathy Hales",
       "current_role": {
-        "title": "Head of Distribution",
-        "employer": "Challenger Limited",
-        "tenure_years": 4.5
+        "title": "Head of Retail Sales",
+        "employer": "Perpetual Limited",
+        "tenure_years": 4.1
       },
-      "career_narrative": "Public evidence most likely places Deborah Southon in the Head of Distribution remit at Challenger Limited, with reported national-scope cues and head-level seniority already visible. This should sit in the early-call shortlist because the remit already sits in wholesale distribution leadership, and the visible remit reads as national in scope; the diligence point is remit depth rather than basic relevance. The initial screening focus should be how much direct IFA and platform penetration sits behind the remit, with team leadership scale behind the remit as the next point that still needs confirmation.",
+      "career_narrative": "Public evidence places Cathy Hales in a commercially adjacent Head of Retail Sales remit at Perpetual Limited, with public signals pointing to a mixed distribution lane, plus regional scope and head-level seniority. This looks relevant enough for a screening call because the remit already sits at broad distribution-leadership level, and the visible remit reads as regional in scope, even if it still sits one commercial step away from a clean shortlist profile. The main point to test on a first call is team leadership scale behind the remit; whether the exposure is mainly ANZ, global, or local in practice also still needs confirmation.",
       "experience_tags": [
-        "wholesale distribution leadership",
-        "national scope",
-        "retirement and investment products",
-        "adviser and intermediary channels",
-        "challenger limited platform experience"
+        "retail sales leadership",
+        "platform distribution",
+        "adviser channel",
+        "wholesale distribution exposure",
+        "national scope australia",
+        "perpetual limited",
+        "wealth management",
+        "commercially hands-on"
       ],
-      "firm_aum_context": "Challenger Limited appears to be an established Australian financial-services platform with a clear market footprint. The remit is closer to intermediary and wholesale distribution than to a pure institutional coverage role. Based on firm type and sector context, exact AUM is unavailable here, so the better recruiter read is firm type, market position, and channel context.",
+      "firm_aum_context": "Perpetual Limited looks like an established diversified funds-management platform with identifiable market relevance in funds management. The remit appears to cut across more than one distribution lane, which matters for a broad commercial brief. Exact AUM is unavailable here; the useful takeaway is firm profile, market position, and channel mix rather than a precise figure.",
       "mobility_signal": {
         "score": 4,
-        "rationale": "Public chronology suggests roughly 4.6 years in the current role, so the visible remit looks more established than newly stepped into. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and probed in conversation; the evidence supports early-priority outreach on relevance grounds, not an assumption that chronology makes the person movable."
+        "rationale": "Public chronology suggests approximately 4.1 years in the current role, which reads as an established regional scope remit at head-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach framed as a calibration call rather than a presumed move."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
-        "score": 7,
-        "justification": "First-wave shortlist target; compared with others in this slate, Head of Distribution at Challenger Limited sits closer to immediate call priority because it brings one of the cleaner overlaps with the brief, especially around national wholesale coverage; the remit already sits in wholesale distribution leadership; the visible remit reads as national in scope. The main fit gap is how much direct IFA and platform penetration sits behind the remit; team leadership scale behind the remit also remains to be tested. That is the first issue to pressure-test on a call: How much direct IFA and platform penetration sits behind the remit today?"
+        "score": 5,
+        "justification": "Head of Retail Sales at Perpetual Limited looks commercially relevant to the brief, especially around regional multi-channel coverage; the remit already sits at broad distribution-leadership level; the visible remit reads as regional in scope, but it still reads as a prove-it call. The biggest diligence gap is team leadership scale behind the remit; whether the exposure is mainly ANZ, global, or local in practice should be checked alongside it. The first call should test transferability on this point: What size team has this role actually led?"
       },
-      "outreach_hook": "Hi Deborah, we're moving quickly on a Head of Distribution search and your current remit at Challenger Limited looks close enough to warrant an early call, particularly around national intermediary coverage with leadership scale."
+      "outreach_hook": "Hi Cathy, your coverage at Perpetual Limited is not a straight title match to the brief, but there is enough overlap around regional senior distribution exposure with team scale to justify a quick conversation, particularly if role depth proves stronger than it first reads."
     },
     {
       "candidate_id": "candidate_5",
@@ -124,26 +127,23 @@
       },
       "career_narrative": "Task input lists Nikki Thomas as Senior BDM Wholesale at Magellan Financial, but the current-profile match remains unreliable in public evidence. The lane still looks commercially relevant on the face of the input, especially around wholesale national, but this should stay as a tentative market map entry until the current-profile match is confirmed; the current role carries clear wholesale distribution exposure, and the visible remit reads as national in scope. The initial screening focus should be how much direct IFA and platform penetration sits behind the remit, with team leadership scale behind the remit as the next point that still needs confirmation.",
       "experience_tags": [
-        "wholesale distribution",
-        "adviser relationships",
-        "platform engagement",
-        "australian funds management",
-        "magellan financial",
-        "national scope suggested",
-        "identity unverified",
-        "no confirmed leadership remit"
+        "wholesale_distribution",
+        "adviser_engagement",
+        "platform_coverage",
+        "funds_management",
+        "unverified_profile"
       ],
       "firm_aum_context": "Magellan Financial looks like a visible Australian asset-management brand with a recognizable market presence. The visible channel mix is intermediary and wholesale-led rather than institutional-only. Exact AUM is unavailable here; the useful takeaway is firm profile, market position, and channel mix rather than a precise figure.",
       "mobility_signal": {
         "score": 2,
-        "rationale": "Public chronology remains unreliable because the current-profile match is not trusted, even though the task input still suggests reported national-scope cues and BDM-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach kept exploratory because profile certainty is still the gating issue."
+        "rationale": "Public chronology remains unreliable because the current-profile match is not trusted, even though the task input still suggests reported national-scope cues and BDM-level seniority. No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any market-map name is treated as more than exploratory."
       },
       "role_fit": {
         "role": "Head of Distribution / National BDM",
         "score": 2,
-        "justification": "Lower-priority mapping lead; compared with others in this slate, the task input suggests commercially relevant national wholesale coverage exposure at Magellan Financial, but the current-profile match is still unreliable. The main fit gap is how much direct IFA and platform penetration sits behind the remit; team leadership scale behind the remit also remains to be tested. The quickest diligence question is this: How much direct IFA and platform penetration sits behind the remit today?"
+        "justification": "The task input suggests commercially relevant national wholesale coverage exposure at Magellan Financial, but the current-profile match is still too unreliable to treat as a priority call. The main fit gap is how much direct IFA and platform penetration sits behind the remit; team leadership scale behind the remit also remains to be tested. Before this moves up the list, the first call should test one thing: How much direct IFA and platform penetration sits behind the remit today?"
       },
-      "outreach_hook": "Hi Nikki, we're mapping a distribution brief and wanted to sense-check whether your remit at Magellan Financial genuinely covers IFA and platform coverage behind the remit."
+      "outreach_hook": "Hi Nikki, I'm working on a distribution brief and wanted to sense-check whether your remit at Magellan Financial genuinely reaches into IFA and platform coverage behind the remit, especially around coverage depth."
     }
   ]
 }

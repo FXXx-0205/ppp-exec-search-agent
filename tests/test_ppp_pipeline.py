@@ -15,6 +15,7 @@ from app.ppp.enrichment import (
 )
 from app.ppp.pipeline import (
     PPPTaskError,
+    _apply_listwise_ranking,
     _load_candidates_csv,
     _load_role_spec,
     _resolve_research_mode,
@@ -217,6 +218,47 @@ def _build_candidate_payload(
             }
         )
     return {"candidates": candidates}
+
+
+def _build_rankable_bundle(tmp_path, enrichments):
+    base_payload = {
+        "candidate_id": "candidate_1",
+        "full_name": "Placeholder",
+        "current_role": {"title": "Placeholder", "employer": "Placeholder", "tenure_years": 2.0},
+        "career_narrative": "Placeholder one. Placeholder two. Placeholder three.",
+        "experience_tags": ["distribution"],
+        "firm_aum_context": "Placeholder context.",
+        "mobility_signal": {
+            "score": 3,
+            "rationale": "Public chronology remains limited. No direct public signal of mobility is visible, so openness should be treated as uncertain pending conversation.",
+        },
+        "role_fit": {"role": "Head of Distribution / National BDM", "score": 7, "justification": "Placeholder one. Placeholder two. Placeholder three."},
+        "outreach_hook": "Placeholder hook.",
+    }
+
+    briefs = []
+    enrichments_by_id = {}
+    for idx, enrichment in enumerate(enrichments, start=1):
+        candidate_id = f"candidate_{idx}"
+        payload = dict(base_payload)
+        payload["candidate_id"] = candidate_id
+        payload["full_name"] = enrichment.full_name
+        briefs.append(
+            _stabilize_candidate_brief(
+                candidate_brief=validate_and_repair_candidate_payload(
+                    payload,
+                    candidate_id=candidate_id,
+                    full_name=enrichment.full_name,
+                ),
+                enrichment=enrichment.model_copy(update={"candidate_id": candidate_id}),
+            )
+        )
+        enrichments_by_id[candidate_id] = enrichment.model_copy(update={"candidate_id": candidate_id})
+    return briefs, enrichments_by_id
+
+
+def _override_recruiter_signals(enrichment, **updates):
+    return enrichment.model_copy(update={"recruiter_signals": enrichment.recruiter_signals.model_copy(update=updates)})
 
 
 def test_load_candidates_csv_requires_exactly_five_rows(tmp_path) -> None:
@@ -834,7 +876,576 @@ def test_stabilized_output_differentiates_lane_scope_and_hook_across_candidates(
     assert "institutional" in institutional_brief.outreach_hook.lower()
     assert "broader channel stretch" in institutional_brief.outreach_hook.lower()
     assert "wealth and intermediary distribution leadership" in wealth_brief.outreach_hook.lower()
-    assert "step-up conversation" in wholesale_brief.outreach_hook.lower()
+    assert any(
+        phrase in wholesale_brief.outreach_hook.lower()
+        for phrase in (
+            "credible progression conversation",
+            "credible progression",
+            "plausible progression",
+            "broader role",
+            "plausible stretch",
+            "broader distribution brief",
+        )
+    )
+
+
+def test_listwise_ranking_enforces_bundle_level_ordering_and_separation(tmp_path) -> None:
+    enrichments = [
+        _build_enrichment(
+            tmp_path,
+            full_name="Strong Shortlist",
+            employer="Strong AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Strong Shortlist is Head of Distribution at Strong AM."],
+                "likely_channel_evidence": ["Public snippets reference wholesale and institutional distribution coverage."],
+            },
+        ),
+        _build_enrichment(
+            tmp_path,
+            full_name="Adjacent Institutional",
+            employer="Adjacent AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Adjacent Institutional is Director, Institutional Sales at Adjacent AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        _build_enrichment(
+            tmp_path,
+            full_name="Stretch Wholesale",
+            employer="Stretch AM",
+            title="Senior BDM Wholesale",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Stretch Wholesale is Senior BDM Wholesale at Stretch AM."],
+                "likely_channel_evidence": ["Public snippets reference wholesale and IFA distribution coverage."],
+            },
+        ),
+        _build_enrichment(
+            tmp_path,
+            full_name="Unverified Head",
+            employer="Unverified AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "not_verified",
+                "likely_channel_evidence": ["Public snippets reference mixed distribution leadership."],
+            },
+        ),
+        _build_enrichment(
+            tmp_path,
+            full_name="Investment Adjacent",
+            employer="Investment AM",
+            title="Senior Investment Analyst",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Investment Adjacent is Senior Investment Analyst at Investment AM."],
+                "likely_channel_evidence": ["Public snippets reference research and investment analysis rather than direct distribution coverage."],
+            },
+        ),
+    ]
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, enrichments)
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    candidate_scores = {brief.candidate_id: brief.role_fit.score for brief in briefs}
+    assert len(set(candidate_scores.values())) >= 3
+    assert candidate_scores["candidate_1"] > candidate_scores["candidate_3"]
+    assert candidate_scores["candidate_2"] > candidate_scores["candidate_3"]
+    assert candidate_scores["candidate_3"] > candidate_scores["candidate_4"]
+    assert candidate_scores["candidate_3"] > candidate_scores["candidate_5"]
+
+
+def test_listwise_ranking_prefers_better_mandate_fit_over_head_level_status(tmp_path) -> None:
+    enrichments = [
+        _build_enrichment(
+            tmp_path,
+            full_name="Head of Wealth",
+            employer="Wealth AM",
+            title="Head of Wealth",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Head of Wealth is Head of Wealth at Wealth AM."],
+                "likely_channel_evidence": ["Public snippets reference wealth distribution leadership."],
+            },
+        ),
+        _build_enrichment(
+            tmp_path,
+            full_name="National BDM",
+            employer="Core AM",
+            title="National BDM",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["National BDM is National BDM at Core AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional and wholesale distribution coverage."],
+            },
+        ),
+    ]
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, enrichments)
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    assert briefs[0].full_name == "National BDM"
+    assert briefs[0].role_fit.score > briefs[1].role_fit.score
+
+
+def test_head_of_distribution_but_adjacent_lane_falls_to_core_not_strong(tmp_path) -> None:
+    adjacent_head = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Adjacent Head",
+            employer="Adjacent AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Adjacent Head is Head of Distribution at Adjacent AM."],
+                "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        channel_orientation="mixed",
+        scope_signal="national",
+        seniority_signal="head_level",
+    )
+    direct_director = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Direct Director",
+            employer="Direct AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Direct Director is Director, Institutional Sales at Direct AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        scope_signal="national",
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [adjacent_head, direct_director])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    scores_by_name = {brief.full_name: brief.role_fit.score for brief in briefs}
+    assert scores_by_name["Adjacent Head"] <= 6
+    assert briefs[0].full_name == "Direct Director"
+
+
+def test_mixed_channel_head_does_not_auto_beat_clean_director_fit(tmp_path) -> None:
+    mixed_head = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Mixed Head",
+            employer="Mixed AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Mixed Head is Head of Distribution at Mixed AM."],
+                "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        channel_orientation="mixed",
+        scope_signal="anz",
+        seniority_signal="head_level",
+    )
+    clean_director = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Clean Director",
+            employer="Clean AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Clean Director is Director, Institutional Sales at Clean AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        scope_signal="national",
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [mixed_head, clean_director])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    assert briefs[0].full_name == "Clean Director"
+    assert briefs[0].role_fit.score > briefs[1].role_fit.score
+
+
+def test_listwise_ranking_keeps_head_level_step_up_out_of_shortlist_band(tmp_path) -> None:
+    shortlist = _build_enrichment(
+        tmp_path,
+        full_name="Shortlist Head",
+        employer="Shortlist AM",
+        title="Head of Distribution",
+        fixture={
+            "identity_resolution_status": "verified_match",
+            "verified_public_snippets": ["Shortlist Head is Head of Distribution at Shortlist AM."],
+            "likely_channel_evidence": ["Public snippets reference institutional and wholesale distribution coverage."],
+        },
+    )
+    head_step_up = _build_enrichment(
+        tmp_path,
+        full_name="Head Stretch",
+        employer="Stretch AM",
+        title="Head of Distribution",
+        fixture={
+            "identity_resolution_status": "verified_match",
+            "verified_public_snippets": ["Head Stretch is Head of Distribution at Stretch AM."],
+            "likely_channel_evidence": ["Public snippets reference wholesale distribution coverage."],
+        },
+    )
+    head_step_up = head_step_up.model_copy(
+        update={
+            "recruiter_signals": head_step_up.recruiter_signals.model_copy(
+                update={"mandate_similarity": "step_up_candidate"}
+            )
+        }
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [shortlist, head_step_up])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    scores_by_name = {brief.full_name: brief.role_fit.score for brief in briefs}
+    assert scores_by_name["Shortlist Head"] >= 7
+    assert scores_by_name["Head Stretch"] <= 4
+    assert scores_by_name["Shortlist Head"] > scores_by_name["Head Stretch"]
+
+
+def test_core_screen_remains_distinct_from_step_up_screen(tmp_path) -> None:
+    core_candidate = _build_enrichment(
+        tmp_path,
+        full_name="Core Candidate",
+        employer="Core AM",
+        title="Director, Institutional Sales",
+        fixture={
+            "identity_resolution_status": "possible_match",
+            "possible_public_snippets": ["Public search surfaced a possible match for Core Candidate."],
+            "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+        },
+    )
+    step_up_candidate = _build_enrichment(
+        tmp_path,
+        full_name="Step Up Candidate",
+        employer="Stretch AM",
+        title="Senior BDM Wholesale",
+        fixture={
+            "identity_resolution_status": "verified_match",
+            "verified_public_snippets": ["Step Up Candidate is Senior BDM Wholesale at Stretch AM."],
+            "likely_channel_evidence": ["Public snippets reference wholesale and IFA distribution coverage."],
+        },
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [core_candidate, step_up_candidate])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    scores_by_name = {brief.full_name: brief.role_fit.score for brief in briefs}
+    assert scores_by_name["Core Candidate"] in {7, 6, 5}
+    assert scores_by_name["Step Up Candidate"] in {4, 3}
+    assert scores_by_name["Core Candidate"] > scores_by_name["Step Up Candidate"]
+
+
+def test_mapping_candidate_does_not_get_promoted_by_senior_title(tmp_path) -> None:
+    mapping_head = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Mapping Head",
+            employer="Mapping AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Mapping Head is Head of Distribution at Mapping AM."],
+                "likely_channel_evidence": ["Public snippets reference broad commercial leadership."],
+            },
+        ),
+        mandate_similarity="unclear_fit",
+        channel_orientation="mixed",
+        scope_signal="global",
+        seniority_signal="head_level",
+    )
+    direct_candidate = _build_enrichment(
+        tmp_path,
+        full_name="Direct Candidate",
+        employer="Direct AM",
+        title="Director, Institutional Sales",
+        fixture={
+            "identity_resolution_status": "verified_match",
+            "verified_public_snippets": ["Direct Candidate is Director, Institutional Sales at Direct AM."],
+            "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+        },
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [mapping_head, direct_candidate])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    scores_by_name = {brief.full_name: brief.role_fit.score for brief in briefs}
+    assert scores_by_name["Mapping Head"] <= 4
+    assert scores_by_name["Direct Candidate"] > scores_by_name["Mapping Head"]
+
+
+def test_listwise_ranking_is_deterministic_within_tier_and_input_order_independent(tmp_path) -> None:
+    enrichments = [
+        _build_enrichment(
+            tmp_path,
+            full_name="Director One",
+            employer="Firm One",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Director One is Director, Institutional Sales at Firm One."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        _build_enrichment(
+            tmp_path,
+            full_name="Director Two",
+            employer="Firm Two",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Director Two is Director, Institutional Sales at Firm Two."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+    ]
+
+    briefs_a, enrichments_a = _build_rankable_bundle(tmp_path, enrichments)
+    briefs_b, enrichments_b = _build_rankable_bundle(tmp_path, list(reversed(enrichments)))
+
+    _apply_listwise_ranking(briefs_a, enrichments_a)
+    _apply_listwise_ranking(briefs_b, enrichments_b)
+
+    assert [brief.candidate_id for brief in briefs_a] == ["candidate_1", "candidate_2"]
+    assert [brief.candidate_id for brief in briefs_b] == ["candidate_1", "candidate_2"]
+    assert [brief.role_fit.score for brief in briefs_a] == [7, 6]
+    assert [brief.role_fit.score for brief in briefs_b] == [7, 6]
+
+
+def test_core_screen_assigns_distinct_scores_to_top_three_when_call_priority_differs(tmp_path) -> None:
+    direct_director = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Direct Director",
+            employer="Direct AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Direct Director is Director, Institutional Sales at Direct AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        scope_signal="national",
+    )
+    broad_head = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Broad Head",
+            employer="Broad AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Broad Head is Head of Distribution at Broad AM."],
+                "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        channel_orientation="mixed",
+        scope_signal="national",
+        seniority_signal="head_level",
+    )
+    prove_it_core = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Prove It Core",
+            employer="Proveit AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "possible_match",
+                "possible_public_snippets": ["Public search surfaced a possible match for Prove It Core."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        scope_signal="regional",
+        mandate_similarity="adjacent_match",
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [direct_director, broad_head, prove_it_core])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    assert [brief.role_fit.score for brief in briefs] == [7, 6, 5]
+
+
+def test_direct_lane_director_can_take_higher_core_score_than_broader_head(tmp_path) -> None:
+    direct_director = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Direct Director",
+            employer="Direct AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Direct Director is Director, Institutional Sales at Direct AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        scope_signal="national",
+    )
+    broader_head = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Broader Head",
+            employer="Broad AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Broader Head is Head of Distribution at Broad AM."],
+                "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        channel_orientation="mixed",
+        scope_signal="national",
+        seniority_signal="head_level",
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [broader_head, direct_director])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    scores_by_name = {brief.full_name: brief.role_fit.score for brief in briefs}
+    assert scores_by_name["Direct Director"] > scores_by_name["Broader Head"]
+
+
+def test_core_score_reflects_call_order_not_just_list_position(tmp_path) -> None:
+    first_call = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="First Call",
+            employer="First AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["First Call is Director, Institutional Sales at First AM."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        scope_signal="national",
+    )
+    second_call = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Second Call",
+            employer="Second AM",
+            title="Head of Distribution",
+            fixture={
+                "identity_resolution_status": "verified_match",
+                "verified_public_snippets": ["Second Call is Head of Distribution at Second AM."],
+                "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        channel_orientation="mixed",
+        scope_signal="anz",
+        seniority_signal="head_level",
+    )
+    third_call = _override_recruiter_signals(
+        _build_enrichment(
+            tmp_path,
+            full_name="Third Call",
+            employer="Third AM",
+            title="Director, Institutional Sales",
+            fixture={
+                "identity_resolution_status": "possible_match",
+                "possible_public_snippets": ["Public search surfaced a possible match for Third Call."],
+                "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+            },
+        ),
+        mandate_similarity="adjacent_match",
+        scope_signal="regional",
+    )
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, [third_call, second_call, first_call])
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    assert [brief.full_name for brief in briefs] == ["First Call", "Third Call", "Second Call"]
+    assert [brief.role_fit.score for brief in briefs] == [7, 6, 5]
+
+
+def test_tail_of_large_core_group_is_not_flattened_into_single_score_without_reason(tmp_path) -> None:
+    enrichments = [
+        _override_recruiter_signals(
+            _build_enrichment(
+                tmp_path,
+                full_name="Core One",
+                employer="One AM",
+                title="Director, Institutional Sales",
+                fixture={
+                    "identity_resolution_status": "verified_match",
+                    "verified_public_snippets": ["Core One is Director, Institutional Sales at One AM."],
+                    "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+                },
+            ),
+            mandate_similarity="adjacent_match",
+            scope_signal="national",
+        ),
+        _override_recruiter_signals(
+            _build_enrichment(
+                tmp_path,
+                full_name="Core Two",
+                employer="Two AM",
+                title="Head of Distribution",
+                fixture={
+                    "identity_resolution_status": "verified_match",
+                    "verified_public_snippets": ["Core Two is Head of Distribution at Two AM."],
+                    "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+                },
+            ),
+            mandate_similarity="adjacent_match",
+            channel_orientation="mixed",
+            scope_signal="national",
+            seniority_signal="head_level",
+        ),
+        _override_recruiter_signals(
+            _build_enrichment(
+                tmp_path,
+                full_name="Core Three",
+                employer="Three AM",
+                title="Director, Institutional Sales",
+                fixture={
+                    "identity_resolution_status": "possible_match",
+                    "possible_public_snippets": ["Public search surfaced a possible match for Core Three."],
+                    "likely_channel_evidence": ["Public snippets reference institutional distribution coverage."],
+                },
+            ),
+            mandate_similarity="adjacent_match",
+            scope_signal="regional",
+        ),
+        _override_recruiter_signals(
+            _build_enrichment(
+                tmp_path,
+                full_name="Core Four",
+                employer="Four AM",
+                title="Head of Distribution",
+                fixture={
+                    "identity_resolution_status": "verified_match",
+                    "verified_public_snippets": ["Core Four is Head of Distribution at Four AM."],
+                    "likely_channel_evidence": ["Public snippets reference broad distribution leadership."],
+                },
+            ),
+            mandate_similarity="adjacent_match",
+            channel_orientation="mixed",
+            scope_signal="regional",
+            seniority_signal="head_level",
+        ),
+    ]
+
+    briefs, enrichments_by_id = _build_rankable_bundle(tmp_path, enrichments)
+    _apply_listwise_ranking(briefs, enrichments_by_id)
+
+    core_scores = [brief.role_fit.score for brief in briefs]
+    assert core_scores[:3] == [7, 6, 5]
+    assert len(set(core_scores)) >= 3
 
 
 def test_stabilized_output_keeps_deliberate_bad_candidate_low_confidence(tmp_path) -> None:
@@ -905,9 +1516,16 @@ def test_stabilized_output_handles_not_verified_identity_as_unverified_market_in
 
     candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
 
-    assert candidate.role_fit.score <= 2
+    assert 1 <= candidate.role_fit.score <= 4
     assert "does not yet give a reliable current-profile match" in candidate.career_narrative.lower() or "current-profile link is still not reliable enough" in candidate.career_narrative.lower()
-    assert "lower-priority mapping lead" in candidate.role_fit.justification.lower()
+    assert any(
+        phrase in candidate.role_fit.justification.lower()
+        for phrase in (
+            "too unreliable to treat as a priority call",
+            "needs verification before it can be prioritised",
+            "still too unreliable to treat as a priority call",
+        )
+    )
     assert "distribution brief" in candidate.outreach_hook.lower() or "distribution briefs" in candidate.outreach_hook.lower()
 
 
