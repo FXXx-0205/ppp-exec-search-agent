@@ -15,12 +15,15 @@ from app.ppp.enrichment import (
 )
 from app.ppp.pipeline import (
     PPPTaskError,
+    _mobility_follow_up_sentence,
     _load_candidates_csv,
     _load_role_spec,
+    _role_fit_strength,
     _resolve_research_mode,
     _stabilize_candidate_brief,
     run_ppp_pipeline,
 )
+from app.ppp.prompts import build_final_brief_system_prompt
 from app.ppp.qa import run_bundle_qa, validate_output_bundle
 from app.ppp.research import ResearchClientError, TavilyResearchClient
 from app.ppp.role_spec import load_role_spec_json_text, normalize_role_spec, parse_role_spec_text
@@ -229,6 +232,42 @@ def test_load_candidates_csv_requires_exactly_five_rows(tmp_path) -> None:
 
     with pytest.raises(PPPTaskError, match="expected 5 candidates"):
         _load_candidates_csv(path)
+
+
+def test_final_brief_prompt_requires_slate_relative_judgment() -> None:
+    prompt = build_final_brief_system_prompt()
+    assert "first-wave shortlist targets" in prompt
+    assert "Include one explicit slate-relative signal" in prompt
+    assert "practical outreach posture" in prompt
+
+
+def test_role_fit_strength_uses_slate_relative_positioning(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        full_name="Alex Example",
+        employer="Example AM",
+        title="Head of Distribution",
+    )
+
+    text = _role_fit_strength(enrichment=enrichment)
+
+    assert "compared with others in this slate" in text.lower()
+    assert any(marker in text for marker in ("First-wave shortlist target", "Credible adjacent screen", "Likely active-screen candidate"))
+
+
+def test_mobility_follow_up_adds_outreach_posture_without_claiming_readiness(tmp_path) -> None:
+    enrichment = _build_enrichment(
+        tmp_path,
+        full_name="Jordan Example",
+        employer="Example AM",
+        title="Head of Distribution",
+    )
+
+    text = _mobility_follow_up_sentence(enrichment=enrichment, match_state="verified_match")
+
+    assert "No direct public signal of move readiness is visible" in text
+    assert any(marker in text for marker in ("early-priority", "calibration", "exploratory"))
+    assert "should be treated as uncertain" in text or "uncertain and" in text
 
 
 def test_load_candidates_csv_requires_columns(tmp_path) -> None:

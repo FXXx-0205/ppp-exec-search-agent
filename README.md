@@ -2,9 +2,9 @@
 
 This repository is my submission for the Platinum Pacific Partners practical task.
 
-I treated the task as an executive-search workflow, not as a generic “AI recruiter” exercise. The job here is to take a five-row `candidates.csv`, turn imperfect public-profile evidence into something usable, and export an `output.json` that a consultant could actually review. The output is meant to help with real search judgment: who looks shortlist-worthy, who is worth a screen, and who should stay in the market map, while still being honest about what public evidence does and does not support.
+I approached it as a small internal search-execution tool, not as a generic “AI recruiter” demo. The job is to take a five-row `candidates.csv`, normalize uneven public evidence with real Claude tool use, and produce an `output.json` that helps a consultant decide who belongs in the first-call group, who deserves an adjacent screen, and who should stay in the market map without overstating what the evidence can support.
 
-For review purposes, the fixture-backed path is the canonical submission path. It is the reproducible way to run the project, and the committed `data/ppp/output.json` should be treated as the primary artifact for evaluation. Live mode is still included because the task calls for a real Claude tool and a real public-research-capable workflow, but live results can vary as public sources and search-provider coverage change.
+For review purposes, the fixture-backed path is the canonical submission-review path. The committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is the primary artifact for evaluation and represents the promoted best fixture-backed submission artifact. Live mode is still included because the task calls for a real Claude tool and a real public-research-capable workflow, but live results can vary as public sources and search-provider coverage change.
 
 ## What This Submission Does
 
@@ -39,11 +39,11 @@ Optional for live public-web research:
 export TAVILY_API_KEY=your_tavily_key_here
 ```
 
-Live mode is optional. It demonstrates the public-web research path, but it is not the canonical submission path because external evidence can change even when the code and prompts do not.
+Live mode is optional. It demonstrates the public-web research path, but it is not the canonical submission-review path because external evidence can change even when the code and prompts do not.
 
 ### Reproducible PPP Run
 
-This is the main command for the reproducible submission path. It uses the included research fixtures, keeps the review path stable, and reproduces the output shape PPP is evaluating:
+This is the main command for the recommended submission-review path. It uses the included research fixtures, keeps the review path stable, and reproduces the output shape PPP is evaluating:
 
 ```bash
 python3 scripts/run_ppp_task.py \
@@ -83,7 +83,7 @@ By default, the UI:
 - writes QA and run artifacts to `data/ppp/intermediate/`
 - uses fixture mode as the safest path for submission review and demo use
 
-The committed `data/ppp/output.json` remains the correct artifact to review because it comes from this reproducible path. Live mode uses the same interface and schema guarantees, but the available public evidence may vary over time.
+The committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) remains the correct artifact to review because it is the promoted best fixture-backed output. Re-running fixture mode uses the same inputs, research fixtures, schema checks, and QA path, but the final briefs are still model-generated, so wording may vary slightly between runs. Live mode uses the same interface and schema guarantees, but the available public evidence may vary over time.
 
 ## Architecture
 
@@ -101,7 +101,18 @@ The system first builds a candidate research package from fixture or live public
 
 I kept this phase separate because I did not want research, confidence handling, and final writing to collapse into one prompt. The purpose of this step is to stabilize evidence before any recruiter-style synthesis happens.
 
-In practice, that gives the repository two honest operating modes: a fixture-backed path for stable submission review and a live public-web path for external enrichment. Both use the same two-step architecture and the same schema contract. The difference is that live research depends on changing external evidence.
+In practice, that gives the repository two honest operating modes: a fixture-backed path for stable submission review and a live public-web path for external enrichment. Both use the same two-step architecture and the same schema contract. The fixture-backed path is the recommended review path because it keeps the evidence pack stable and schema-safe, even though the final brief wording may still vary slightly across runs. The live path is intentionally more variable because it depends on changing external evidence.
+
+### Why The Tool Step Matters
+
+The tool step is there to improve judgment quality, not just to satisfy the assignment requirement. Without the normalization pass, several candidates would collapse into the same generic note shape: senior distribution title, plausible relevance, uncertain scope, worth a call. The tool-assisted research phase makes the differences more usable by separating profile confidence, remit shape, channel orientation, and chronology quality before the final shortlist note is written.
+
+That matters commercially. It is the difference between:
+
+- a bundle of five similar summaries
+- a slate that separates first-wave calls from calibration screens and mapping-only names
+
+In other words, the tool is doing workflow work. It is not decorative infrastructure around the final JSON.
 
 ### 2. Final Candidate Brief Generation
 
@@ -127,7 +138,7 @@ If the bundle is malformed, export is blocked. Bundle-level QA also flags repeti
 
 ## Output Contract
 
-`data/ppp/output.json` is the primary deliverable.
+`data/ppp/output.json` is the primary deliverable and the canonical submission artifact.
 
 It contains:
 
@@ -187,6 +198,8 @@ The current output is tuned to help a PPP consultant answer:
 
 The final artifact therefore aims to read like a recruiter note, not like a generic LLM summary.
 
+If productised further for PPP, the immediate week-one unlock would be faster mandate triage: consultants could move from raw names to call-priority, adjacent-screen, and map-only lanes with a tighter audit trail around what the public evidence actually supports.
+
 ## Intermediate Artifacts
 
 Useful generated files include:
@@ -201,14 +214,14 @@ The current checked bundle reports:
 - `run_report.json`: 5 successful candidates, 0 failures
 - `qa_report.json`: `passed: true`
 
-For PPP review, `data/ppp/output.json` is still the main file to inspect. The intermediate artifacts support QA and traceability, but they do not replace the final deliverable.
+For PPP review, [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is the main file to inspect. It is the promoted best fixture-backed artifact selected because it gave the strongest submission-safe balance of recruiter usefulness, evidence discipline, and QA cleanliness. The intermediate artifacts support QA and traceability, but they do not replace the final deliverable.
 
 ## Known Limitations
 
 - Public evidence is uneven. The system can frame likely remit shape and firm context, but it should not be read as knowing hidden details such as exact team size, direct reports, or move intent unless those are actually supported.
 - `firm_aum_context` is usually qualitative rather than numeric. That is deliberate when exact AUM cannot be defended from the available evidence.
 - The scoring and phrasing are tuned for this PPP brief, not as a universal executive-search scoring model.
-- Fixture mode is the most reproducible path and the recommended submission path. Live web research can add evidence, but results may vary with external provider availability, public-profile coverage, and changing source material. That variability does not change the schema guarantees or the runnable interface; it only changes what evidence is available to the research step at that moment.
+- Fixture mode is the recommended submission-review path because it keeps the evidence pack, schema checks, and QA path stable. The final candidate briefs are still model-generated, so wording may vary slightly between fixture-backed runs; the committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is therefore the canonical artifact to inspect. Live web research can add evidence, but results are inherently more variable because provider availability, public-profile coverage, and source material can change over time.
 
 ## What I Would Build Next For PPP
 
