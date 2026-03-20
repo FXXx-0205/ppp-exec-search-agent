@@ -35,7 +35,7 @@ class ClaudeClient:
         estimated_tokens = max(1, (len(system_prompt) + len(user_prompt)) // 4)
         extra_payload = dict(extra or {})
         tool_definitions = cast(list[dict[str, Any]] | None, extra_payload.pop("tools", None))
-        tool_runner = cast(ToolRunner | None, extra_payload.pop("tool_runner", None))
+        extra_payload.pop("tool_runner", None)
         extra_payload.pop("tool_choice", None)
         extra_payload.pop("max_tool_rounds", None)
         allow_fallback = bool(extra_payload.pop("allow_fallback", True))
@@ -175,6 +175,8 @@ class ClaudeClient:
         return self._create_message_from_kwargs(kwargs)
 
     def _create_message_from_kwargs(self, kwargs: dict[str, Any]) -> Any:
+        if self._client is None:
+            raise RuntimeError("Claude client must be initialized before creating a message.")
         delay_seconds = 1.0
         for attempt in range(3):
             try:

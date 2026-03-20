@@ -84,7 +84,9 @@ def _allowed_facts_from_prompt(payload: dict[str, object]) -> dict[str, object]:
         }
     normalized = payload["normalized_evidence"]
     assert isinstance(normalized, dict)
-    current_role = payload["required_output_shape"]["current_role"]
+    required_output_shape = payload["required_output_shape"]
+    assert isinstance(required_output_shape, dict)
+    current_role = required_output_shape["current_role"]
     assert isinstance(current_role, dict)
     return {
         "current_role": {
@@ -338,6 +340,10 @@ def test_claude_client_handles_real_tool_roundtrip() -> None:
 
     tool_calls: list[tuple[str, dict[str, Any]]] = []
 
+    def record_tool_call(tool_name: str, tool_input: dict[str, Any]) -> dict[str, str]:
+        tool_calls.append((tool_name, tool_input))
+        return {"match_confidence_state": "verified_match"}
+
     text = client.run_tool_phase_once(
         system_prompt="system",
         user_prompt=json.dumps({"candidate_identity": {"candidate_id": "candidate_1"}, "research_package": {}, "role_spec": {}}),
@@ -352,9 +358,7 @@ def test_claude_client_handles_real_tool_roundtrip() -> None:
             }
         ],
         tool_choice={"type": "any"},
-        tool_runner=lambda tool_name, tool_input: (
-            tool_calls.append((tool_name, tool_input)) or {"match_confidence_state": "verified_match"}
-        ),
+        tool_runner=record_tool_call,
     )
 
     assert json.loads(text)["candidate_id"] == "candidate_1"

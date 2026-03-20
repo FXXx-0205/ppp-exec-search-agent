@@ -72,6 +72,13 @@ streamlit run streamlit_app.py
 
 The UI does not reimplement the business logic. It calls the same PPP pipeline and still writes the same structured `output.json`.
 
+By default, the UI:
+
+- saves uploaded CSVs to `data/ppp/uploaded_candidates.csv`
+- writes the exported briefing bundle to `data/ppp/output.json`
+- writes QA and run artifacts to `data/ppp/intermediate/`
+- uses fixture mode as the safest demo path unless the user deliberately switches to live public-web research
+
 ## Architecture
 
 The pipeline is intentionally narrow and acceptance-driven.

@@ -45,7 +45,6 @@ from app.ppp.schema import (
 )
 from app.ppp.style import choose_variant, polish_join, polish_text
 from app.ppp.validator import (
-    describe_validation_failure,
     parse_candidate_response,
     parse_json_response,
     parse_normalized_evidence_response,
@@ -892,12 +891,12 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
     match_state = enrichment.normalized_evidence().match_confidence_state
     bucket = _priority_bucket(enrichment=enrichment)
     if match_state == "no_reliable_match":
-        bucket = [
+        exploratory_bucket = [
             f"Hi {first_name}, we're mapping a distribution brief and wanted to sense-check whether your remit at {employer} genuinely covers {angle}.",
             f"Hi {first_name}, we're keeping a market map around a distribution search and wanted to confirm whether your role at {employer} really includes {angle}.",
             f"Hi {first_name}, one of our distribution briefs has some adjacency to your remit at {employer}, and I wanted to check how much it really reaches into {angle}.",
         ]
-        return choose_variant(bucket, candidate_brief.full_name, employer, angle, "not_verified")
+        return choose_variant(exploratory_bucket, candidate_brief.full_name, employer, angle, "not_verified")
     if bucket == "strong_shortlist":
         shortlist_bucket = [
             f"Hi {first_name}, we're already prioritising a small shortlist for a senior distribution mandate, and your remit at {employer} looks firmly in range, especially around {angle}; open to a brief conversation?",
@@ -920,20 +919,20 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
         ]
         return choose_variant(adjacent_bucket, candidate_brief.full_name, employer, angle, "credible_adjacent_screen")
     if match_state in {"likely_match", "partial_match"}:
-        bucket = [
+        possible_match_bucket = [
             f"Hi {first_name}, we're running a distribution search and your remit at {employer} looks close enough to warrant a screening chat, especially around {angle}.",
             f"Hi {first_name}, your current remit at {employer} looks relevant to a live distribution brief, particularly where it touches {angle}; open to a quick conversation?",
             f"Hi {first_name}, we're speaking with a short list of relevant distribution profiles and your work at {employer} stood out on {angle}; would a brief chat be worthwhile?",
             f"Hi {first_name}, one of our active distribution mandates overlaps with your remit at {employer}, especially around {angle}; keen to compare notes?",
         ]
-        return choose_variant(bucket, candidate_brief.full_name, employer, angle, "possible_match")
+        return choose_variant(possible_match_bucket, candidate_brief.full_name, employer, angle, "possible_match")
     if _is_non_distribution_title(enrichment.current_title.lower()):
-        bucket = [
+        adjacent_title_bucket = [
             f"Hi {first_name}, we're mapping adjacent profiles around a distribution search and wanted to understand how client-facing your remit at {employer} actually is, especially around {angle}.",
             f"Hi {first_name}, your background at {employer} looks more adjacent than like-for-like to a distribution mandate, but I wanted to compare notes on any investor-facing overlap, particularly {angle}.",
             f"Hi {first_name}, we're pressure-testing adjacent investment-side profiles against a distribution brief and your remit at {employer} raised a question around {angle}; open to a quick compare-and-contrast?",
         ]
-        return choose_variant(bucket, candidate_brief.full_name, employer, angle, "adjacent")
+        return choose_variant(adjacent_title_bucket, candidate_brief.full_name, employer, angle, "adjacent")
     variants = {
         "direct_match": [
             f"Hi {first_name}, we're partnering with an active manager on a distribution search and your current remit at {employer} looks highly relevant, especially around {angle}; open to a brief chat?",
@@ -960,8 +959,8 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
             f"Hi {first_name}, one of our active mandates has some adjacency to your remit at {employer}, especially around {angle}; worth a brief introduction?",
         ],
     }
-    bucket = variants.get(signals.mandate_similarity, variants["unclear_fit"])
-    return choose_variant(bucket, candidate_brief.full_name, employer, angle, signals.mandate_similarity)
+    variant_bucket = variants.get(signals.mandate_similarity, variants["unclear_fit"])
+    return choose_variant(variant_bucket, candidate_brief.full_name, employer, angle, signals.mandate_similarity)
 
 
 def _supported_remit_phrase(enrichment: CandidateEnrichmentResult) -> str:
@@ -1362,7 +1361,6 @@ def _priority_bucket(*, enrichment: CandidateEnrichmentResult) -> str:
 
     has_head_distribution_title = "head of distribution" in title
     head_like_scope = signals.seniority_signal == "head_level" and signals.scope_signal in {"national", "anz", "regional", "global"}
-    channel_close = signals.channel_orientation in {"wholesale", "institutional", "mixed"}
 
     if (
         signals.mandate_similarity == "direct_match"

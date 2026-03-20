@@ -312,7 +312,7 @@ with st.sidebar:
         inject_api_key("")
         inject_tavily_api_key("")
         st.success("Cleared locally saved API keys.")
-    st.caption("Live mode uses public web research and API credits. Fixture mode uses local mock research for fast testing.")
+    st.caption("Live mode uses public web research and API credits. Fixture mode uses local research fixtures and is the safest submission/demo path.")
     inject_api_key(api_key)
     inject_tavily_api_key(tavily_api_key)
     st.caption("Upload a five-row candidate CSV, run the existing PPP pipeline, and review client-ready briefings.")
@@ -363,6 +363,10 @@ if reset_role_spec_clicked:
     st.session_state["ppp_role_spec_source_text"] = ""
 
 st.markdown("## Candidate CSV")
+st.caption(
+    f"Uploaded CSVs are saved to `{DEFAULT_PATHS.display(DEFAULT_UPLOADED_CSV)}` and the generated bundle is written to "
+    f"`{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH)}` with QA artifacts in `{DEFAULT_PATHS.display(DEFAULT_INTERMEDIATE_DIR)}`."
+)
 uploaded_csv = st.file_uploader("Upload candidate CSV", type=["csv"])
 
 generate_clicked = st.button("🚀 Generate Briefings", type="primary", use_container_width=True)
