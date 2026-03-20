@@ -60,6 +60,9 @@ def build_final_brief_system_prompt() -> str:
         "Differentiate clearly between shortlist-style targets, adjacent screens, and mapping leads. "
         "Do not flatten scores around the mid-point by default. "
         "State one strongest fit factor and one main test or gap per candidate, and keep uncertainty concise and specific rather than generic. "
+        "For role_fit.justification, prefer this logic: sentence 1 = why in frame, sentence 2 = why not clean yet, sentence 3 = first call question. "
+        "For outreach_hook, use one specific candidate angle only; do not stack three different selling points in one sentence. "
+        "Write like a recruiter deciding whether the call is worth taking now, not like a résumé summarizer. "
         "Avoid reusing the same structural phrasing across every candidate note."
     )
 
@@ -100,6 +103,15 @@ def build_final_brief_user_prompt(
             "recruiter_calibration": (
                 "Make the priority legible: shortlist-style target vs adjacent screen vs mapping lead. "
                 "Avoid giving near-identical role_fit scores unless the evidence truly supports it."
+            ),
+            "role_fit_sentence_plan": [
+                "Sentence 1: strongest supported fit reason tied to employer, lane, scope, or seniority",
+                "Sentence 2: main commercial gap or transfer risk with explicit uncertainty language",
+                "Sentence 3: the first call question or screening angle",
+            ],
+            "outreach_hook_plan": (
+                "Use one angle only. Prefer one of: direct-match angle, adjacent-transfer angle, gap-led angle, or verify-first angle. "
+                "The hook should sound like a consultant opening a call, not a generic invitation."
             ),
         },
         "required_output_shape": {

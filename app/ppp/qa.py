@@ -268,7 +268,7 @@ def _check_candidate(
     role_fit_sentences = _sentence_count(candidate.role_fit.justification)
     if role_fit_sentences != 3:
         findings.append(
-            _error(candidate.candidate_id, "role_fit_sentences", "role_fit.justification must contain exactly 3 sentences.")
+            _style_hint(candidate.candidate_id, "role_fit_sentences", "role_fit.justification works best at exactly 3 sentences for consistency.")
         )
 
     combined = " ".join(
@@ -303,7 +303,7 @@ def _check_candidate(
             )
     for term in BAD_PHRASE_TERMS:
         if term in combined:
-            findings.append(_error(candidate.candidate_id, "bad_phrase_suppression", f"Output contains banned phrasing: '{term}'."))
+            findings.append(_style_hint(candidate.candidate_id, "bad_phrase_suppression", f"Output contains overused phrasing: '{term}'."))
 
     findings.extend(_check_recruiter_usefulness(candidate, enrichment))
     findings.extend(_check_uncertainty_expression(candidate, enrichment))
@@ -569,6 +569,10 @@ def _warning(candidate_id: str | None, check: str, message: str) -> QAFinding:
     return QAFinding(candidate_id=candidate_id, severity="warning", check=check, message=message)
 
 
+def _style_hint(candidate_id: str | None, check: str, message: str) -> QAFinding:
+    return QAFinding(candidate_id=candidate_id, severity="info", check=check, message=message)
+
+
 def _check_recruiter_usefulness(
     candidate: CandidateBrief,
     enrichment: CandidateEnrichmentResult | None,
@@ -643,7 +647,7 @@ def _check_recruiter_usefulness(
         )
     if enrichment is not None and _has_only_low_value_gaps(enrichment.recruiter_signals.key_gaps):
         findings.append(
-            _error(
+            _warning(
                 candidate.candidate_id,
                 "low_value_gap_suppression",
                 "recruiter_signals.key_gaps cannot collapse to only exact AUM or date-style admin gaps when stronger commercial gaps are available.",
@@ -653,7 +657,7 @@ def _check_recruiter_usefulness(
     hook_text = candidate.outreach_hook.lower()
     if any(term in hook_text for term in GENERIC_INVITATION_TERMS) and not _contains_specific_commercial_angle(candidate.outreach_hook, enrichment):
         findings.append(
-            _error(
+            _warning(
                 candidate.candidate_id,
                 "outreach_hook_generic_invitation",
                 "outreach_hook cannot be just a generic invitation; it needs a concrete commercial angle.",
@@ -661,7 +665,7 @@ def _check_recruiter_usefulness(
         )
     if not _contains_specific_commercial_angle(candidate.outreach_hook, enrichment):
         findings.append(
-            _error(
+            _warning(
                 candidate.candidate_id,
                 "outreach_hook_commercial_angle",
                 "outreach_hook must include one specific commercial angle grounded in recruiter_signals or supported claims.",
@@ -696,15 +700,7 @@ def _check_uncertainty_expression(
         )
 
     role_fit_text = candidate.role_fit.justification.lower()
-    if (
-        "unverified" not in role_fit_text
-        and "does not confirm" not in role_fit_text
-        and "remains unclear" not in role_fit_text
-        and "not verified" not in role_fit_text
-        and "remains to be tested" not in role_fit_text
-        and "should be checked" not in role_fit_text
-        and "to test" not in role_fit_text
-    ):
+    if not _has_role_fit_uncertainty_signal(role_fit_text):
         findings.append(
             _error(
                 candidate.candidate_id,
@@ -971,6 +967,29 @@ def _has_only_low_value_gaps(gaps: list[str]) -> bool:
     if has_high_value:
         return False
     return all(any(term in gap for term in LOW_VALUE_GAP_TERMS) for gap in cleaned)
+
+
+def _has_role_fit_uncertainty_signal(text: str) -> bool:
+    uncertainty_markers = (
+        "unverified",
+        "does not confirm",
+        "remains unclear",
+        "not verified",
+        "remains to be tested",
+        "remain to be tested",
+        "should be checked",
+        "to test",
+        "not yet clear",
+        "not fully clear",
+        "not fully verified",
+        "not fully proven",
+        "not fully de-risked",
+        "still needs testing",
+        "still needs confirmation",
+        "public record does not yet make it clear",
+        "public evidence alone",
+    )
+    return any(marker in text for marker in uncertainty_markers)
 
 
 def _check_bundle_differentiation(

@@ -770,11 +770,7 @@ with run_panel:
         )
 
     st.caption("This will generate the final candidate briefing bundle (`output.json`).")
-    action_col_one, action_col_two = st.columns(2)
-    with action_col_one:
-        generate_clicked = st.button("Generate output bundle (output.json)", use_container_width=True)
-    with action_col_two:
-        preview_clicked = st.button("Preview saved bundle", use_container_width=True)
+    generate_clicked = st.button("Generate output bundle (output.json)", use_container_width=True)
 
 inject_api_key(api_key)
 inject_tavily_api_key(tavily_api_key)
@@ -831,21 +827,6 @@ if generate_clicked:
                 st.session_state["ppp_qa_report_json"] = qa_report_json
                 st.session_state["ppp_last_saved_role_spec"] = DEFAULT_PATHS.display(role_spec_path)
                 st.rerun()
-
-if preview_clicked:
-    try:
-        output, result, output_json, run_report_json, qa_report_json = _load_saved_preview_bundle()
-    except FileNotFoundError:
-        st.error("No saved bundle found yet. Generate once first, or keep the committed `data/ppp/output.json` in place.")
-    except (json.JSONDecodeError, ValueError) as exc:
-        st.error(f"Saved bundle could not be loaded: {exc}")
-    else:
-        st.session_state["ppp_run_result"] = result
-        st.session_state["ppp_output"] = output
-        st.session_state["ppp_output_json"] = output_json
-        st.session_state["ppp_run_report_json"] = run_report_json
-        st.session_state["ppp_qa_report_json"] = qa_report_json
-        st.rerun()
 
 with st.expander("Advanced: local key storage", expanded=False):
     remember_keys = st.checkbox(

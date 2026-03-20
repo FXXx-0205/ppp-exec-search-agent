@@ -895,29 +895,10 @@ def _safe_role_fit_score(*, candidate_brief: CandidateBrief, enrichment: Candida
 
 def _safe_role_fit_justification(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
-    sentence_one = _soften_role_fit_chain(_role_fit_strength(enrichment=enrichment))
-    sentence_two = _role_fit_gap(enrichment=enrichment)
     screening_question = signals.screening_priority_question.strip()
-    bucket = _priority_bucket(enrichment=enrichment)
-    if bucket == "strong_shortlist":
-        variants = [
-            f"The first call should test this point first: {screening_question}",
-            f"The screening call should focus first on this point: {screening_question}",
-            f"That is the first issue to pressure-test on a call: {screening_question}",
-        ]
-    elif bucket == "credible_adjacent_screen":
-        variants = [
-            f"The first call should test transferability on this point: {screening_question}",
-            f"The screening call should focus first on this point: {screening_question}",
-            f"The screening call should focus first on this point: {screening_question}",
-        ]
-    else:
-        variants = [
-            f"Before this moves up the list, the first call should test one thing: {screening_question}",
-            f"The screening call should focus first on this point: {screening_question}",
-            f"The quickest diligence question is this: {screening_question}",
-        ]
-    sentence_three = choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, bucket, "screening_sentence")
+    sentence_one = _role_fit_positioning_sentence(enrichment=enrichment)
+    sentence_two = _role_fit_gap_sentence(enrichment=enrichment)
+    sentence_three = _role_fit_screening_sentence(enrichment=enrichment, screening_question=screening_question)
     return polish_join(sentence_one, sentence_two, sentence_three)
 
 
@@ -1090,8 +1071,20 @@ def _apply_listwise_ranking(
             tier_group.sort(key=lambda item: (-item[1], item[0].candidate_id))
         band = _tier_score_band(tier)
         assigned_scores = _band_scores_for_group(group_size=len(tier_group), band=band)
-        for assigned_score, (candidate, _objective, _enrichment) in zip(assigned_scores, tier_group, strict=True):
-            candidate.role_fit = candidate.role_fit.model_copy(update={"score": assigned_score})
+        group_size = len(tier_group)
+        for rank_index, (assigned_score, (candidate, _objective, tier_enrichment)) in enumerate(
+            zip(assigned_scores, tier_group, strict=True),
+            start=1,
+        ):
+            base_score = _base_score_for_tier(tier=tier, enrichment=tier_enrichment)
+            final_score = _stabilized_listwise_score(
+                tier=tier,
+                group_size=group_size,
+                rank_index=rank_index,
+                listwise_score=assigned_score,
+                base_score=base_score,
+            )
+            candidate.role_fit = candidate.role_fit.model_copy(update={"score": final_score})
             ranked_candidates.append(candidate)
 
     candidates[:] = ranked_candidates
@@ -1121,6 +1114,50 @@ def _listwise_allowed_scores(*, enrichment: CandidateEnrichmentResult) -> list[i
     return _tier_score_band(_ranking_tier(enrichment=enrichment))
 
 
+def _base_score_for_tier(*, tier: RankingTier, enrichment: CandidateEnrichmentResult) -> int:
+    strength = _ranking_objective_strength(enrichment=enrichment)
+    match_state = enrichment.normalized_evidence().match_confidence_state
+
+    if tier == "strong_shortlist":
+        return 9 if strength >= 0.82 and match_state in {"verified_match", "likely_match"} else 8
+    if tier == "core_screen":
+        if strength >= 0.72 and match_state in {"verified_match", "likely_match"}:
+            return 7
+        if strength >= 0.58 and match_state in {"verified_match", "likely_match"}:
+            return 6
+        return 5
+    if tier == "step_up_screen":
+        return 4 if strength >= 0.38 else 3
+    return 2 if strength >= 0.12 else 1
+
+
+def _stabilized_listwise_score(
+    *,
+    tier: RankingTier,
+    group_size: int,
+    rank_index: int,
+    listwise_score: int,
+    base_score: int,
+) -> int:
+    band = _tier_score_band(tier)
+    lower_bound = min(band)
+    upper_bound = max(band)
+
+    if group_size <= 1:
+        return max(lower_bound, min(upper_bound, base_score))
+
+    # Keep listwise differentiation, but limit how far candidate scores can drift
+    # away from their absolute strength just because another candidate moved tiers.
+    allowed_downward_drift = 2 if group_size >= 3 and rank_index >= 3 else 1
+    adjusted = max(base_score - allowed_downward_drift, min(base_score + 1, listwise_score))
+
+    # Preserve a little separation at the top of the tier when signals are otherwise close.
+    if rank_index == 1 and adjusted < listwise_score:
+        adjusted = min(upper_bound, adjusted + 1)
+
+    return max(lower_bound, min(upper_bound, adjusted))
+
+
 def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
     angle = _hook_angle(signals)
@@ -1142,38 +1179,38 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
         hook_gap = "product breadth"
     if match_state == "no_reliable_match":
         exploratory_bucket = [
-            f"Hi {first_name}, I'm working on a distribution brief and wanted to sense-check whether your remit at {employer} genuinely reaches into {angle}, especially around {hook_gap}.",
-            f"Hi {first_name}, I wanted to confirm whether your role at {employer} really includes {angle} rather than a narrower remit for a distribution brief, particularly on {hook_gap}.",
-            f"Hi {first_name}, your remit at {employer} looked directionally relevant to a distribution brief, and I wanted to check how much it really reaches into {angle}, especially where {hook_gap} is concerned.",
+            f"Hi {first_name}, I may be wrong, but if your current remit at {employer} genuinely includes {angle}, it would be worth a quick calibration chat on a distribution brief.",
+            f"Hi {first_name}, I may be wrong, but if your role at {employer} really reaches into {angle}, it would be useful to compare notes briefly on a distribution brief.",
+            f"Hi {first_name}, if your remit at {employer} genuinely covers {angle}, it would be worth a quick sanity-check conversation on a distribution brief.",
         ]
-        return choose_variant(exploratory_bucket, candidate_brief.full_name, employer, angle, "not_verified")
+        return choose_variant(exploratory_bucket, candidate_brief.full_name, employer, angle, "verify_first")
     if bucket == "strong_shortlist":
         shortlist_bucket = [
-            f"Hi {first_name}, I'm working on a senior distribution mandate, and your remit at {employer} looks firmly in range, especially around {angle} with {hook_gap} as the main diligence point.",
-            f"Hi {first_name}, your current remit at {employer} looks close to a Head of Distribution brief, particularly around {angle}, and the main thing I'd want to test is {hook_gap}.",
-            f"Hi {first_name}, your work at {employer} looks highly relevant to a senior distribution search, especially where it touches {angle}; the main point I'd want to test is {hook_gap}.",
+            f"Hi {first_name}, your remit at {employer} stood out because it looks unusually close to a live distribution brief needing {angle}.",
+            f"Hi {first_name}, your work at {employer} caught my attention because it looks close to a senior distribution brief built around {angle}.",
+            f"Hi {first_name}, the reason for reaching out is that your remit at {employer} looks close to a live distribution search needing {angle}.",
         ]
-        return choose_variant(shortlist_bucket, candidate_brief.full_name, employer, angle, "strong_shortlist")
+        return choose_variant(shortlist_bucket, candidate_brief.full_name, employer, angle, "direct_match_hook")
     if bucket == "credible_adjacent_screen":
         if signals.mandate_similarity == "step_up_candidate":
             step_up_bucket = [
-                f"Hi {first_name}, I'm working on a senior distribution mandate and your remit at {employer} looks worth testing as a plausible progression from the current remit, especially around {angle}, with {hook_gap} the first thing I'd want to explore.",
-                f"Hi {first_name}, your work at {employer} is not a straight replica of our brief, but it does look like the kind of profile worth testing for a broader role, particularly around {angle} if {hook_gap} checks out.",
-                f"Hi {first_name}, your remit at {employer} stands out as a plausible stretch toward a broader distribution brief, especially around {angle} and {hook_gap}.",
+                f"Hi {first_name}, you're not the obvious title match for a broader distribution brief, but the overlap with {angle} is exactly what I wanted to sanity-check.",
+                f"Hi {first_name}, your background at {employer} is not a straight replica of our brief, but the overlap with {angle} is interesting enough to warrant a quick calibration chat.",
+                f"Hi {first_name}, your remit at {employer} looks like a plausible stretch toward a broader distribution brief because of the overlap with {angle}.",
             ]
-            return choose_variant(step_up_bucket, candidate_brief.full_name, employer, angle, "step_up_bucket")
+            return choose_variant(step_up_bucket, candidate_brief.full_name, employer, angle, "adjacent_step_up_hook")
         adjacent_bucket = [
-            f"Hi {first_name}, your remit at {employer} looks worth pressure-testing against a senior distribution brief, especially around {angle}, with {hook_gap} as the main gap.",
-            f"Hi {first_name}, your coverage at {employer} is not a straight title match to the brief, but there is enough overlap around {angle} to justify a quick conversation, particularly if {hook_gap} proves stronger than it first reads.",
-            f"Hi {first_name}, your remit at {employer} looks commercially relevant to a senior distribution role, especially around {angle}; the first thing I'd want to test is {hook_gap}.",
+            f"Hi {first_name}, you're not the obvious title match for a head-of-distribution brief, but your remit at {employer} looks like the kind of adjacent background worth sanity-checking if it genuinely reaches into {angle}.",
+            f"Hi {first_name}, I'm working on a broader distribution brief, and your remit at {employer} looks close enough to warrant a quick conversation.",
+            f"Hi {first_name}, your work at {employer} caught my attention because the overlap with {angle} looks real enough to justify a quick calibration call.",
         ]
-        return choose_variant(adjacent_bucket, candidate_brief.full_name, employer, angle, "credible_adjacent_screen")
+        return choose_variant(adjacent_bucket, candidate_brief.full_name, employer, angle, "adjacent_transfer_hook")
     if match_state in {"likely_match", "partial_match"}:
         possible_match_bucket = [
-            f"Hi {first_name}, we're running a distribution search and your remit at {employer} looks close enough to warrant a screening chat, especially around {angle}.",
-            f"Hi {first_name}, your current remit at {employer} looks relevant to a live distribution brief, particularly where it touches {angle}; open to a quick conversation?",
-            f"Hi {first_name}, we're speaking with a short list of relevant distribution profiles and your work at {employer} stood out on {angle}; would a brief chat be worthwhile?",
-            f"Hi {first_name}, one of our active distribution mandates overlaps with your remit at {employer}, especially around {angle}; keen to compare notes?",
+            f"Hi {first_name}, we're running a distribution search and your remit at {employer} looks close enough to warrant a screening chat.",
+            f"Hi {first_name}, your current remit at {employer} looks relevant to a live distribution brief, particularly where it touches {angle}.",
+            f"Hi {first_name}, we're speaking with a short list of relevant distribution profiles and your work at {employer} stood out on {angle}.",
+            f"Hi {first_name}, one of our active distribution mandates overlaps with your remit at {employer}, especially around {angle}.",
         ]
         return choose_variant(possible_match_bucket, candidate_brief.full_name, employer, angle, "possible_match")
     if _is_non_distribution_title(enrichment.current_title.lower()):
@@ -1211,6 +1248,88 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
     }
     variant_bucket = variants.get(signals.mandate_similarity, variants["unclear_fit"])
     return choose_variant(variant_bucket, candidate_brief.full_name, employer, angle, signals.mandate_similarity)
+
+
+def _role_fit_positioning_sentence(*, enrichment: CandidateEnrichmentResult) -> str:
+    signals = enrichment.recruiter_signals
+    title = _sentence_safe_title(enrichment.current_title)
+    employer = enrichment.current_employer
+    lane_scope = _join_angle(_scope_label(signals.scope_signal), f"{_lane_label(signals.channel_orientation)} coverage").strip()
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
+
+    if match_state == "no_reliable_match":
+        return (
+            f"The {employer} input keeps the profile in frame only because the apparent overlap with "
+            f"{lane_scope or 'distribution'} could still be commercially relevant, but the current-profile match is still too unreliable to treat as a priority call."
+        )
+    if bucket == "strong_shortlist":
+        variants = [
+            f"{title} at {employer} brings one of the clearer supported overlaps with the brief because the profile already appears to sit in {lane_scope or 'a relevant distribution lane'}.",
+            f"{title} at {employer} is one of the closer visible fits in the slate because the remit already reads as {lane_scope or 'commercially relevant distribution coverage'} with usable leadership relevance.",
+            f"{title} at {employer} looks firmly in frame because the visible remit already maps to {lane_scope or 'a commercially relevant distribution lane'} rather than a speculative adjacent read.",
+        ]
+        return choose_variant(variants, enrichment.full_name, employer, "role_fit_positioning_strong")
+    if bucket == "credible_adjacent_screen":
+        variants = [
+            f"{title} at {employer} brings supported relevance because the profile already shows enough overlap with {lane_scope or 'the mandate lane'} to justify a real screen.",
+            f"{title} at {employer} stays in frame because the visible remit still carries commercially relevant overlap with {lane_scope or 'the brief lane'}.",
+            f"{title} at {employer} is worth a proper screening call because the public record still points to meaningful overlap with {lane_scope or 'the target distribution lane'}.",
+        ]
+        return choose_variant(variants, enrichment.full_name, employer, "role_fit_positioning_adjacent")
+    if signals.mandate_similarity == "step_up_candidate":
+        return f"{title} at {employer} stays in frame because the visible remit still offers a plausible progression path into broader {lane_scope or 'distribution leadership'}."
+    return _soften_role_fit_chain(_role_fit_strength(enrichment=enrichment))
+
+
+def _role_fit_gap_sentence(*, enrichment: CandidateEnrichmentResult) -> str:
+    signals = enrichment.recruiter_signals
+    primary_gap = _strip_gap_qualifier(signals.key_gaps[0]) if signals.key_gaps else "the exact scope behind the remit"
+    secondary_gap = _strip_gap_qualifier(signals.key_gaps[1]) if len(signals.key_gaps) > 1 else ""
+    match_state = enrichment.normalized_evidence().match_confidence_state
+
+    if match_state == "no_reliable_match":
+        return f"The limiting factor is identity confidence, because {primary_gap} is not verified and the current-profile match remains unclear from public evidence."
+
+    if secondary_gap:
+        variants = [
+            f"The key unresolved point is that {primary_gap} remains to be tested rather than verified from public evidence, with {secondary_gap} the next point to pressure-test.",
+            f"The real transfer risk is that {primary_gap} is still not verified from the public record, and {secondary_gap} also remains to be tested.",
+            f"The unresolved point is not basic relevance but proof, because {primary_gap} remains unclear from public evidence, with {secondary_gap} still to test after that.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, primary_gap, secondary_gap, "role_fit_gap_dual")
+
+    variants = [
+        f"The key unresolved point is that {primary_gap} remains to be tested rather than verified from public evidence.",
+        f"The unresolved point is that {primary_gap} is still not verified from the public record.",
+        f"The transfer case still depends on proof, because {primary_gap} remains unclear from public evidence.",
+    ]
+    return choose_variant(variants, enrichment.full_name, enrichment.current_employer, primary_gap, "role_fit_gap_single")
+
+
+def _role_fit_screening_sentence(*, enrichment: CandidateEnrichmentResult, screening_question: str) -> str:
+    bucket = _priority_bucket(enrichment=enrichment)
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    if match_state == "no_reliable_match":
+        variants = [
+            f"Before this moves beyond market-map status, the screening call should focus first on this point: {screening_question}",
+            f"Before this moves up the list, the first call should test one thing: {screening_question}",
+            f"The quickest diligence question is this: {screening_question}",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, "verify_first_sentence")
+    if bucket == "strong_shortlist":
+        variants = [
+            f"The first call should test one thing first: {screening_question}",
+            f"The screening call should focus first on this point: {screening_question}",
+            f"That is the first issue to pressure-test on a call: {screening_question}",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, "screening_strong")
+    variants = [
+        f"The screening call should focus first on this point: {screening_question}",
+        f"The first call should test transferability on one point: {screening_question}",
+        f"The screening call should focus first on this point: {screening_question}",
+    ]
+    return choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, "screening_adjacent")
 
 
 def _supported_remit_phrase(enrichment: CandidateEnrichmentResult) -> str:

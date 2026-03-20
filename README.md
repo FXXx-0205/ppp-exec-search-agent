@@ -2,7 +2,7 @@
 
 This repository is my submission for the Platinum Pacific Partners practical task.
 
-## Quick Start 
+## Run in 3 Minutes
 
 ```bash
 python3 -m venv .venv
@@ -24,6 +24,30 @@ python3 scripts/run_ppp_task.py \
   --intermediate-dir data/ppp/intermediate \
   --model claude-sonnet-4-5
 ```
+
+## Fastest Way to Review (No Setup Thinking Required)
+
+If you just want to see what this produces:
+
+1. Run this (fixture mode, no external APIs needed):
+
+```bash
+python3 scripts/run_ppp_task.py --research-mode fixture
+```
+
+Open:
+
+- [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) -> main result
+- [data/ppp/intermediate/qa_report.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/intermediate/qa_report.json) -> validation report
+
+Read only:
+
+- `role_fit.score` (call order)
+- `role_fit.justification` (why this order)
+- `outreach_hook` (what you would actually send)
+
+This is the intended reviewer path.
+
 ## Non-Technical UI
 
 For a reviewer who prefers a UI:
@@ -81,6 +105,15 @@ python3 scripts/run_ppp_task.py \
 ## Fixture vs Live
 
 Fixture mode is recommended for submission review because it is reproducible and keeps the evidence pack stable. Live mode is also supported for real public-web research, but results can vary as source coverage changes. If you want live enrichment, set `TAVILY_API_KEY` and switch `--research-mode live`.
+
+## Common Issues
+
+- Missing API key
+  Use `--research-mode fixture` to avoid external dependencies.
+- Output not generated
+  Check [data/ppp/intermediate/qa_report.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/intermediate/qa_report.json) for which candidate failed validation.
+- Live mode gives different results
+  This is expected. Public data changes, and fixture mode is the stable reference.
 
 ## Architecture
 
