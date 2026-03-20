@@ -10,6 +10,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.ppp import PPPTaskError, run_ppp_pipeline
+from app.ppp.paths import DEFAULT_PATHS
 from app.ppp.qa import validate_output_bundle, write_qa_report
 
 
@@ -29,13 +30,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         dest="output_path",
-        default="data/ppp/output.json",
+        default=str(DEFAULT_PATHS.output_json),
         help="Path to the output JSON file.",
     )
     parser.add_argument(
         "--role-spec",
         dest="role_spec_path",
-        default="data/ppp/role_spec.json",
+        default=str(DEFAULT_PATHS.role_spec),
         help="Path to the PPP role specification JSON.",
     )
     parser.add_argument(
@@ -45,12 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--intermediate-dir",
-        default="data/ppp/intermediate",
+        default=str(DEFAULT_PATHS.intermediate_dir),
         help="Directory for enrichment artifacts and debug outputs.",
     )
     parser.add_argument(
         "--research-fixtures",
-        default="data/ppp/research_fixtures.json",
+        default=str(DEFAULT_PATHS.research_fixtures),
         help="Fixture-backed public research source for the PPP enrichment tool.",
     )
     parser.add_argument(
@@ -77,7 +78,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    input_path = args.input_path or args.positional_input or "data/ppp/candidates.csv"
+    input_path = args.input_path or args.positional_input or str(DEFAULT_PATHS.candidates_csv)
 
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(levelname)s %(message)s")
 

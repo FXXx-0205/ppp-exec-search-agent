@@ -33,8 +33,64 @@ NEGATIVE_CONTEXT_WORDS = [
     "merger",
     "competitor",
 ]
+CURRENT_ROLE_SIGNAL_PATTERNS = (
+    r"\bis\s+(?:currently\s+)?(?:the\s+)?",
+    r"\bcurrently\s+(?:serves|works|leads|heads|holds)\b",
+    r"\bserves as\b",
+    r"\bleads\b",
+    r"\bheads\b",
+    r"\bjoined\s+[^.]{0,80}\s+as\b",
+)
+HISTORICAL_ROLE_SIGNAL_PATTERNS = (
+    r"\bformer\b",
+    r"\bpreviously\b",
+    r"\bprior\b",
+    r"\bwas\b",
+    r"\bhad previously been\b",
+    r"\bfollowing senior roles\b",
+    r"\bled\b",
+    r"\bbefore joining\b",
+    r"\bdeparted\b",
+    r"\bexit\b",
+)
 GLOBAL_AUM_ALLOWLIST = {"blackrock", "vanguard"}
 YEAR_CONTEXT_WORDS = ("founded", "since", "established", "in", "year")
+AUM_POSITIVE_CONTEXT_WORDS = (
+    "annual report",
+    "financial results",
+    "investor discussion pack",
+    "market release",
+    "reported",
+    "as of",
+    "assets under management",
+    "funds under management",
+    "total aum",
+    "total fum",
+)
+AUM_NEGATIVE_CONTEXT_WORDS = (
+    "acquisition",
+    "acquired",
+    "proposal",
+    "hindered",
+    "outflow",
+    "outflows",
+    "inflow",
+    "inflows",
+    "fell",
+    "falls",
+    "drop in assets",
+    "drop in funds",
+    "shrunk",
+    "shrank",
+    "down from",
+    "up from",
+    "post deal",
+    "deal",
+    "transaction",
+    "merger",
+    "wraps up",
+    "leaves",
+)
 
 
 class ResearchClientError(Exception):
@@ -66,6 +122,8 @@ class TavilyResearchClient:
         ".gov.au",
         "apra.gov.au",
         "asic.gov.au",
+        "company-announcements",
+        "gcs-web.com",
         "morningstar.com.au",
         "financialstandard.com.au",
         "investmentmagazine.com.au",
@@ -174,7 +232,9 @@ class TavilyResearchClient:
                 f'"{tool_input.current_employer}"',
                 '"assets under management"',
                 '"total AUM"',
-                "Australia asset manager funds management",
+                '"annual report"',
+                '"financial results"',
+                "site:asx.com.au OR site:company-announcements.afr.com OR investor OR shareholders pdf Australia asset manager funds management",
             ]
         )
 
@@ -198,10 +258,11 @@ class TavilyResearchClient:
     def _filter_firm_results(self, employer: str, results: list[object]) -> list[dict[str, object]]:
         scored_results: list[tuple[int, dict[str, object]]] = []
         employer_tokens = {token for token in re.findall(r"[a-zA-Z]{3,}", employer.lower())}
+        normalized_employer = self._normalize_company_name(employer)
         for item in results:
             if not isinstance(item, dict):
                 continue
-            score = self._score_firm_result(employer, employer_tokens, item)
+            score = self._score_firm_result(employer, employer_tokens, normalized_employer, item)
             if score < 4:
                 continue
             scored_results.append((score, item))
@@ -251,7 +312,13 @@ class TavilyResearchClient:
             score += 1
         return score
 
-    def _score_firm_result(self, employer: str, employer_tokens: set[str], result: dict[str, object]) -> int:
+    def _score_firm_result(
+        self,
+        employer: str,
+        employer_tokens: set[str],
+        normalized_employer: str,
+        result: dict[str, object],
+    ) -> int:
         title = str(result.get("title", "")).strip()
         content = str(result.get("content", "")).strip()
         url = str(result.get("url", "")).strip()
@@ -264,6 +331,16 @@ class TavilyResearchClient:
 
         combined_text = f"{title} {content}".strip()
         combined = combined_text.lower()
+        source_type = self._source_type(url)
+        if not self._firm_result_matches_employer(
+            employer=employer,
+            normalized_employer=normalized_employer,
+            title=title,
+            url=url,
+            content=content,
+            source_type=source_type,
+        ):
+            return -8
         matched_tokens = [token for token in employer_tokens if token in combined]
         if not matched_tokens:
             return -5
@@ -273,6 +350,14 @@ class TavilyResearchClient:
             score += 5
         if self._contains_numeric_aum(combined_text):
             score += 5
+        if source_type in {"company_site", "regulatory_public"}:
+            score += 5
+        elif source_type == "industry_biography":
+            score += 1
+        if any(term in combined for term in ("annual report", "financial results", "investor discussion pack", "market release", "quarterly update")):
+            score += 4
+        if any(term in combined for term in AUM_NEGATIVE_CONTEXT_WORDS):
+            score -= 6
         if "australia" in combined:
             score += 1
         if any(pattern in host for pattern in self.PREFERRED_HOST_PATTERNS):
@@ -377,7 +462,11 @@ class TavilyResearchClient:
             ]
 
         inferred_tenure_years = self._infer_tenure_years(snippets)
-        firm_aum_context = self._extract_firm_aum_context(tool_input.current_employer, firm_snippets or snippets)
+        firm_aum_context = self._extract_firm_aum_context(
+            tool_input.current_employer,
+            firm_results=firm_results,
+            snippets=firm_snippets or snippets,
+        )
         likely_channel_evidence = self._collect_channel_evidence(tool_input.current_title, snippets)
         likely_experience_evidence = self._collect_experience_evidence(tool_input.current_employer, snippets + firm_snippets)
         uncertain_fields = self._derive_uncertain_fields(snippets + firm_snippets, inferred_tenure_years, firm_aum_context)
@@ -453,7 +542,9 @@ class TavilyResearchClient:
         verified = [
             item
             for item in analyses
-            if item["employer_match"] and (item["title_match"] or item["linkedin_match"] or item["high_confidence_source"])
+            if item["employer_match"]
+            and cast(bool, item["current_role_signal"])
+            and (item["title_match"] or item["linkedin_match"] or item["high_confidence_source"])
         ]
         if verified:
             top = verified[0]
@@ -467,7 +558,23 @@ class TavilyResearchClient:
                 "possible_public_snippets": [str(top["snippet"])],
             }
 
-        possible = [item for item in analyses if item["employer_match"] or item["title_match"]]
+        possible = [
+            item
+            for item in analyses
+            if (
+                cast(bool, item["current_role_signal"])
+                and (item["employer_match"] or item["title_match"] or item["linkedin_match"])
+            )
+            or (
+                item["employer_match"]
+                and item["title_match"]
+                and not cast(bool, item["historical_bias"])
+            )
+            or (
+                item["title_match"]
+                and not cast(bool, item["historical_bias"])
+            )
+        ]
         if possible:
             top = possible[0]
             return {
@@ -505,12 +612,25 @@ class TavilyResearchClient:
         employer_match = tool_input.current_employer.lower() in combined
         title_match = any(token in combined for token in self._significant_title_tokens(tool_input.current_title))
         linkedin_match = self._linkedin_identity_match(tool_input.linkedin_url, url)
+        current_role_signal = self._has_current_role_signal(
+            content=content,
+            current_title=tool_input.current_title,
+            current_employer=tool_input.current_employer,
+            linkedin_match=linkedin_match,
+        )
+        historical_bias = self._has_historical_role_signal(content)
         score = self._score_result(tool_input, result)
+        if historical_bias and not current_role_signal and not linkedin_match:
+            score -= 5
+        if current_role_signal:
+            score += 3
         return {
             "exact_name": exact_name,
             "employer_match": employer_match,
             "title_match": title_match,
             "linkedin_match": linkedin_match,
+            "current_role_signal": current_role_signal,
+            "historical_bias": historical_bias,
             "high_confidence_source": source_type in {"linkedin_public", "company_site", "regulatory_public", "industry_biography"},
             "score": score,
             "source_label": title or url,
@@ -524,6 +644,13 @@ class TavilyResearchClient:
             return "linkedin_public"
         if ".gov" in host or "asx.com.au" in host:
             return "regulatory_public"
+        if "company-announcements" in host:
+            return "company_site"
+        if lowered.endswith(".pdf") and any(
+            term in lowered
+            for term in ("annual-report", "annual_report", "financial-results", "results", "shareholder", "investor", "market-release", "announcement")
+        ):
+            return "company_site"
         if any(token in lowered for token in ("company", "about", "leadership", "team")):
             return "company_site"
         if any(token in host for token in ("morningstar", "financialstandard", "investmentmagazine", "professionalplanner", "ifa.com.au")):
@@ -555,6 +682,73 @@ class TavilyResearchClient:
                 return True
         return False
 
+    def _has_current_role_signal(
+        self,
+        *,
+        content: str,
+        current_title: str,
+        current_employer: str,
+        linkedin_match: bool,
+    ) -> bool:
+        if linkedin_match:
+            return True
+        lowered = re.sub(r"\s+", " ", content.lower()).strip()
+        if current_employer.lower() not in lowered:
+            return False
+        title_tokens = self._significant_title_tokens(current_title)
+        if not any(token in lowered for token in title_tokens):
+            return False
+        return any(re.search(pattern, lowered) for pattern in CURRENT_ROLE_SIGNAL_PATTERNS)
+
+    def _has_historical_role_signal(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", text.lower()).strip()
+        return any(re.search(pattern, lowered) for pattern in HISTORICAL_ROLE_SIGNAL_PATTERNS)
+
+    def _firm_result_matches_employer(
+        self,
+        *,
+        employer: str,
+        normalized_employer: str,
+        title: str,
+        url: str,
+        content: str,
+        source_type: str,
+    ) -> bool:
+        title_and_url = f"{title} {url}".lower()
+        normalized_title_and_url = self._normalize_company_name(title_and_url)
+        employer_parts = normalized_employer.split()
+        if not employer_parts:
+            return False
+
+        exact_phrase_in_title_or_url = normalized_employer in normalized_title_and_url
+        nearby_match = self._employer_is_near_text(
+            text=content,
+            normalized_employer=normalized_employer,
+            anchor_terms=("aum", "fum", "assets under management", "funds under management"),
+        )
+        if source_type in {"company_site", "regulatory_public"}:
+            return exact_phrase_in_title_or_url
+        return exact_phrase_in_title_or_url or nearby_match
+
+    def _employer_is_near_text(
+        self,
+        *,
+        text: str,
+        normalized_employer: str,
+        anchor_terms: tuple[str, ...],
+    ) -> bool:
+        lowered = re.sub(r"\s+", " ", text.lower()).strip()
+        employer_match = re.search(r"\b" + r"\s+".join(re.escape(part) for part in normalized_employer.split()) + r"\b", lowered)
+        if employer_match is None:
+            return False
+        for term in anchor_terms:
+            anchor_match = re.search(re.escape(term), lowered)
+            if anchor_match is None:
+                continue
+            if abs(anchor_match.start() - employer_match.start()) <= 120:
+                return True
+        return False
+
     def _classify_category(self, snippet: str) -> str:
         lowered = snippet.lower()
         if any(token in lowered for token in ("aum", "assets under management", "funds under management")) or self._contains_numeric_aum(snippet):
@@ -579,17 +773,36 @@ class TavilyResearchClient:
                 return round(max(0.5, current_year - start_year), 1)
         return None
 
-    def _extract_firm_aum_context(self, employer: str, snippets: list[str]) -> str:
+    def _extract_firm_aum_context(self, employer: str, *, firm_results: Sequence[object], snippets: list[str]) -> str:
         normalized_employer = self._normalize_company_name(employer)
         preferred_sentence: str | None = None
         preferred_amount: str | None = None
 
-        for snippet in snippets:
+        for item in firm_results:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title", "")).strip()
+            content = str(item.get("content", "")).strip()
+            url = str(item.get("url", "")).strip()
+            source_type = self._source_type(url)
+            if source_type not in {"company_site", "regulatory_public"}:
+                continue
+            snippet = self._compose_snippet(title=title, content=content)
             amount, context_window = self._extract_attributed_aum(snippet, normalized_employer=normalized_employer)
-            if amount is not None:
-                preferred_sentence = self._best_firm_aum_sentence(context_window or snippet) or (context_window or snippet)
+            candidate_sentence = self._best_firm_aum_sentence(context_window or snippet) or (context_window or snippet)
+            if amount is not None and self._is_reliable_aum_context(candidate_sentence):
+                preferred_sentence = candidate_sentence
                 preferred_amount = amount
                 break
+
+        if preferred_amount is None:
+            for snippet in snippets:
+                amount, context_window = self._extract_attributed_aum(snippet, normalized_employer=normalized_employer)
+                candidate_sentence = self._best_firm_aum_sentence(context_window or snippet) or (context_window or snippet)
+                if amount is not None and self._is_reliable_aum_context(candidate_sentence):
+                    preferred_sentence = candidate_sentence
+                    preferred_amount = amount
+                    break
 
         if preferred_amount is not None and preferred_sentence is not None:
             return (
@@ -602,6 +815,18 @@ class TavilyResearchClient:
             if "aum" in lowered or "assets under management" in lowered or "funds under management" in lowered:
                 return f"{employer} appears in public-web snippets with firm-scale references, but the exact AUM figure should still be verified manually."
         return f"{employer} appears in public-web results as an established investment or wealth platform, but exact AUM still requires direct verification."
+
+    def _is_reliable_aum_context(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", text.lower()).strip()
+        if not lowered:
+            return False
+        if not any(term in lowered for term in ("aum", "fum", "assets under management", "funds under management")):
+            return False
+        if any(term in lowered for term in AUM_NEGATIVE_CONTEXT_WORDS):
+            return False
+        if any(term in lowered for term in AUM_POSITIVE_CONTEXT_WORDS):
+            return True
+        return False
 
     def _contains_numeric_aum(self, text: str) -> bool:
         return bool(AUM_SCALED_VALUE_PATTERN.search(text) or AUM_LARGE_AMOUNT_PATTERN.search(text))

@@ -11,26 +11,44 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.llm.anthropic_client import ClaudeClient
+from app.ppp.agent_tools import build_candidate_normalization_tool, run_candidate_tool
 from app.ppp.enrichment import (
     CandidateEnrichmentResult,
     CandidatePublicProfileLookupInput,
     CandidatePublicProfileLookupTool,
+    NormalizedEvidence,
     _is_non_distribution_title,
+    validate_normalized_evidence_payload,
 )
 from app.ppp.models import REQUIRED_CSV_COLUMNS, CandidateCSVRow
+from app.ppp.paths import DEFAULT_PATHS
 from app.ppp.prompts import (
-    build_generation_system_prompt,
-    build_generation_user_prompt,
+    build_candidate_repair_system_prompt,
+    build_candidate_repair_user_prompt,
+    build_final_brief_system_prompt,
+    build_final_brief_user_prompt,
+    build_research_system_prompt,
+    build_research_user_prompt,
 )
 from app.ppp.qa import run_bundle_qa, run_candidate_qa, write_qa_report
 from app.ppp.quality import validate_output_quality
 from app.ppp.research import PublicResearchClient, TavilyResearchClient
 from app.ppp.role_spec import load_role_spec_file
-from app.ppp.schema import CandidateBrief, CandidateRunFailure, MobilitySignal, PPPOutput, PPPRunResult, RoleFit
+from app.ppp.schema import (
+    CandidateBrief,
+    CandidateRunFailure,
+    CurrentRole,
+    MobilitySignal,
+    PPPOutput,
+    PPPRunResult,
+    RoleFit,
+)
 from app.ppp.style import choose_variant, polish_join, polish_text
 from app.ppp.validator import (
     describe_validation_failure,
     parse_candidate_response,
+    parse_json_response,
+    parse_normalized_evidence_response,
     validate_and_repair_candidate_payload,
     validate_output_payload,
 )
@@ -56,8 +74,8 @@ def run_ppp_pipeline(
     output_path: str,
     role_spec_path: str,
     model: str,
-    intermediate_dir: str = "data/ppp/intermediate",
-    research_fixture_path: str = "data/ppp/research_fixtures.json",
+    intermediate_dir: str = str(DEFAULT_PATHS.intermediate_dir),
+    research_fixture_path: str = str(DEFAULT_PATHS.research_fixtures),
     research_mode: str | None = None,
 ) -> PPPRunResult:
     api_key = settings.anthropic_api_key
@@ -65,6 +83,7 @@ def run_ppp_pipeline(
         raise PPPTaskError("ANTHROPIC_API_KEY is missing. Set it in your environment or .env before running the PPP task.")
 
     candidates = _load_candidates_csv(Path(input_path))
+    _reset_intermediate_artifacts(intermediate_dir=intermediate_dir)
     role_spec = _load_role_spec(Path(role_spec_path))
     client = ClaudeClient(api_key=api_key)
     effective_research_mode = _resolve_research_mode(research_mode)
@@ -190,21 +209,35 @@ def run_ppp_pipeline(
             intermediate_dir=intermediate_dir,
         )
         raise PPPTaskError(f"PPP task failed for all candidates. Review {run_report_path} for details.")
+    if len(output_candidates) != 5:
+        run_report_path = _write_run_report(
+            failed_candidates=failed_candidates,
+            warnings=["PPP export blocked because the final output did not contain exactly five candidates."],
+            output_candidates=output_candidates,
+            successful_enrichments=successful_enrichments,
+            output_path=output_path,
+            intermediate_dir=intermediate_dir,
+        )
+        raise PPPTaskError(
+            f"PPP export blocked: expected exactly 5 validated candidates, found {len(output_candidates)}. Review {run_report_path}."
+        )
 
     output = validate_output_payload({"candidates": [candidate.model_dump(mode="json") for candidate in output_candidates]})
+    _ensure_export_ready_output(output)
     warnings: list[str] = []
     try:
         validate_output_quality(output)
     except ValueError as exc:
         draft_output_path = _write_draft_output(output=output, intermediate_dir=intermediate_dir)
-        warnings.append(f"Output quality warning: {exc}. Review {draft_output_path}.")
+        raise PPPTaskError(f"PPP export blocked by output quality validation: {exc}. Review {draft_output_path}.") from exc
     qa_report = run_bundle_qa(output=output, candidates=successful_candidate_inputs, enrichments=successful_enrichments)
     qa_report_path = write_qa_report(qa_report, path=str(Path(intermediate_dir) / "qa_report.json"))
     logger.info("QA report written to %s", qa_report_path)
     if not qa_report.passed:
-        warnings.append(f"Bundle QA flagged issues. Review {qa_report_path} for details.")
+        raise PPPTaskError(f"PPP export blocked by bundle QA. Review {qa_report_path} for details.")
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_export_ready_output(output)
     output_file.write_text(json.dumps(output.model_dump(mode="json"), ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("PPP output written to %s", output_file)
     delivery_status: Literal["success", "partial_success"] = (
@@ -229,6 +262,32 @@ def run_ppp_pipeline(
         qa_report_path=str(qa_report_path),
         run_report_path=str(run_report_path),
     )
+
+
+def _ensure_export_ready_output(output: PPPOutput) -> None:
+    if len(output.candidates) != 5:
+        raise PPPTaskError(f"PPP schema validation failed before export: expected exactly 5 candidates, found {len(output.candidates)}.")
+    for candidate in output.candidates:
+        if not isinstance(candidate.current_role.tenure_years, (int, float)):
+            raise PPPTaskError(f"PPP schema validation failed before export: {candidate.candidate_id}.current_role.tenure_years must be numeric.")
+
+
+def _reset_intermediate_artifacts(*, intermediate_dir: str) -> None:
+    base = Path(intermediate_dir)
+    if not base.exists():
+        return
+    for pattern in (
+        "candidate_*_enriched.json",
+        "candidate_*_error.json",
+        "qa_report.json",
+        "run_report.json",
+        "draft_output.json",
+    ):
+        for path in base.glob(pattern):
+            try:
+                path.unlink()
+            except OSError:
+                logger.warning("Unable to remove stale intermediate artifact: %s", path)
 
 
 def _build_research_client(research_mode: str) -> PublicResearchClient | None:
@@ -293,49 +352,140 @@ def _generate_candidate_brief(
     role_spec: dict[str, Any],
     model: str,
 ) -> CandidateBrief:
-    system_prompt = build_generation_system_prompt()
-    previous_error: str | None = None
-    previous_output: str | None = None
+    # Bug note: the previous implementation mixed tool use, final brief generation, and repair retries
+    # inside one giant control packet. That let orchestration metadata leak back into the model output,
+    # so validation sometimes received a prompt/control object instead of a CandidateBrief.
+    normalized_evidence = _generate_normalized_evidence(
+        client=client,
+        candidate_id=candidate_id,
+        candidate=candidate,
+        enrichment=enrichment,
+        role_spec=role_spec,
+        model=model,
+    )
 
-    for attempt in range(2):
-        user_prompt = build_generation_user_prompt(
+    logger.info("Entering final brief generation phase for %s", candidate.full_name)
+    raw = client.generate_text(
+        system_prompt=build_final_brief_system_prompt(),
+        user_prompt=build_final_brief_user_prompt(
+            candidate_id=candidate_id,
+            candidate=candidate,
+            normalized_evidence=normalized_evidence,
+            enrichment=enrichment,
+            role_spec=role_spec,
+        ),
+        model=model,
+        max_tokens=900,
+        extra={"allow_fallback": False},
+    )
+
+    try:
+        parsed = parse_candidate_response(raw)
+        candidate_brief = validate_and_repair_candidate_payload(
+            parsed,
+            candidate_id=candidate_id,
+            full_name=candidate.full_name,
+            firm_aum_context=enrichment.firm_aum_context,
+            inferred_tenure_years=normalized_evidence.tenure_years,
+        )
+        return _stabilize_candidate_brief(candidate_brief=candidate_brief, enrichment=enrichment)
+    except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+        if "control packet" in str(exc).lower():
+            logger.warning("Detected control-packet output instead of CandidateBrief for %s", candidate.full_name)
+        logger.info("Entering repair phase for %s", candidate.full_name)
+        repaired = _repair_candidate_brief(
+            client=client,
+            candidate_id=candidate_id,
+            candidate=candidate,
+            invalid_raw_output=raw,
+            validation_error=str(exc),
+            enrichment=enrichment,
+            normalized_evidence=normalized_evidence,
+            model=model,
+        )
+        return _stabilize_candidate_brief(candidate_brief=repaired, enrichment=enrichment)
+
+
+def _generate_normalized_evidence(
+    *,
+    client: ClaudeClient,
+    candidate_id: str,
+    candidate: CandidateCSVRow,
+    enrichment: CandidateEnrichmentResult,
+    role_spec: dict[str, Any],
+    model: str,
+) -> NormalizedEvidence:
+    logger.info("Entering research phase for %s", candidate.full_name)
+    raw = client.run_tool_phase_once(
+        system_prompt=build_research_system_prompt(),
+        user_prompt=build_research_user_prompt(
             candidate_id=candidate_id,
             candidate=candidate,
             enrichment=enrichment,
             role_spec=role_spec,
-            previous_error=previous_error,
-            previous_output=previous_output,
+        ),
+        model=model,
+        max_tokens=550,
+        extra_payload={"allow_fallback": False},
+        tool_definitions=[build_candidate_normalization_tool()],
+        tool_choice={"type": "any"},
+        tool_runner=lambda tool_name, tool_input: run_candidate_tool(
+            tool_name,
+            tool_input,
+            enrichment=enrichment,
+            role_spec=role_spec,
+        ),
+    )
+    try:
+        parsed = parse_normalized_evidence_response(raw)
+        return validate_normalized_evidence_payload(parsed)
+    except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+        raise PPPTaskError(f"Research phase failed for {candidate.full_name}: {exc}") from exc
+
+
+def _repair_candidate_brief(
+    *,
+    client: ClaudeClient,
+    candidate_id: str,
+    candidate: CandidateCSVRow,
+    invalid_raw_output: str,
+    validation_error: str,
+    enrichment: CandidateEnrichmentResult,
+    normalized_evidence: NormalizedEvidence,
+    model: str,
+) -> CandidateBrief:
+    try:
+        invalid_payload = parse_json_response(invalid_raw_output)
+    except json.JSONDecodeError:
+        invalid_payload = {"raw_output": invalid_raw_output}
+
+    raw = client.generate_text(
+        system_prompt=build_candidate_repair_system_prompt(),
+        user_prompt=build_candidate_repair_user_prompt(
+            invalid_payload=invalid_payload if isinstance(invalid_payload, dict) else {"raw_output": invalid_raw_output},
+            validation_error=validation_error,
+            candidate_id=candidate_id,
+            full_name=candidate.full_name,
+            firm_aum_context=enrichment.firm_aum_context,
+            tenure_years=normalized_evidence.tenure_years,
+        ),
+        model=model,
+        max_tokens=700,
+        extra={"allow_fallback": False},
+    )
+    try:
+        parsed = parse_candidate_response(raw)
+        return validate_and_repair_candidate_payload(
+            parsed,
+            candidate_id=candidate_id,
+            full_name=candidate.full_name,
+            firm_aum_context=enrichment.firm_aum_context,
+            inferred_tenure_years=normalized_evidence.tenure_years,
         )
-        raw = client.generate_text(system_prompt=system_prompt, user_prompt=user_prompt, model=model, max_tokens=1400)
-        previous_output = raw
-
-        try:
-            parsed = parse_candidate_response(raw)
-        except (json.JSONDecodeError, ValueError) as exc:
-            previous_error = "Return a single valid JSON object only, with no markdown fences or commentary."
-            if attempt == 1:
-                raise PPPTaskError(
-                    f"Claude returned non-JSON output for {candidate.full_name}. Review the prompt or response handling."
-                ) from exc
-            continue
-
-        try:
-            candidate_brief = validate_and_repair_candidate_payload(
-                parsed,
-                candidate_id=candidate_id,
-                full_name=candidate.full_name,
-                firm_aum_context=enrichment.firm_aum_context,
-                inferred_tenure_years=enrichment.inferred_tenure_years,
-            )
-            return _stabilize_candidate_brief(candidate_brief=candidate_brief, enrichment=enrichment)
-        except ValidationError as exc:
-            previous_error = describe_validation_failure(exc)
-            if attempt == 1:
-                raise PPPTaskError(
-                    f"Claude returned invalid schema output for {candidate.full_name}: {previous_error}"
-                ) from exc
-
-    raise PPPTaskError(f"Candidate generation failed for {candidate.full_name}.")
+    except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+        if "control packet" in str(exc).lower():
+            logger.warning("Detected control-packet output during repair for %s", candidate.full_name)
+        raise PPPTaskError(f"Claude repair failed for {candidate.full_name}: {exc}") from exc
 
 
 def _run_enrichment_stage(
@@ -601,6 +751,11 @@ def _stabilize_candidate_brief(
 ) -> CandidateBrief:
     return candidate_brief.model_copy(
         update={
+            "current_role": CurrentRole(
+                title=candidate_brief.current_role.title,
+                employer=candidate_brief.current_role.employer,
+                tenure_years=enrichment.output_tenure_years,
+            ),
             "career_narrative": polish_text(_safe_career_narrative(candidate_brief=candidate_brief, enrichment=enrichment)),
             "firm_aum_context": _safe_firm_aum_context(enrichment=enrichment),
             "mobility_signal": MobilitySignal(
@@ -637,36 +792,41 @@ def _safe_firm_aum_context(*, enrichment: CandidateEnrichmentResult) -> str:
         return _normalize_numeric_aum_context(verified_numeric_claim.statement, employer=enrichment.current_employer)
 
     statement = enrichment.firm_aum_context
-    lowered = statement.lower()
     if _contains_numeric_aum(statement):
         return _normalize_numeric_aum_context(statement, employer=enrichment.current_employer)
-    if any(term in lowered for term in ("unable to verify", "public evidence does not confirm", "estimated", "treated here as")):
-        return _clean_firm_aum_context(statement, employer=enrichment.current_employer)
-    return _fallback_firm_aum_context(enrichment.current_employer)
+    return _qualitative_firm_context(enrichment=enrichment, statement=statement)
 
 
 def _safe_mobility_score(enrichment: CandidateEnrichmentResult) -> int:
-    if enrichment.identity_resolution.status == "not_verified":
-        return 2 if enrichment.recruiter_signals.mandate_similarity == "unclear_fit" else 3
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    if match_state == "no_reliable_match":
+        return 2
     tenure = enrichment.inferred_tenure_years
     if tenure is None or tenure < 0:
         return 3
     if tenure < 1.5:
         return 2
+    if tenure >= 4.0 and match_state in {"verified_match", "likely_match"}:
+        return 4
     if tenure >= 5.0:
         return 3
     return 3
 
 
 def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
+    match_state = enrichment.normalized_evidence().match_confidence_state
     trajectory = _trajectory_signal_sentence(enrichment)
-    if enrichment.identity_resolution.status == "not_verified":
-        sentence_one = trajectory or "Public chronology could not be confirmed because public search did not verify an exact-match profile."
-        sentence_two = "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
+    # Important trust-calibration boundary: once the pipeline decides a current-profile
+    # match is too weak to trust for precise tenure output, mobility copy must not reintroduce
+    # that precision via a chronology sentence. Keep chronology, tenure precision, and move
+    # readiness wording aligned in the final exported artifact.
+    if match_state == "no_reliable_match":
+        sentence_one = trajectory or "Public chronology could not be validated against a reliable current-profile match."
+        sentence_two = _mobility_follow_up_sentence(match_state=match_state)
         return polish_join(sentence_one, sentence_two)
-    if enrichment.identity_resolution.status == "possible_match" and enrichment.inferred_tenure_years is None:
-        sentence_one = trajectory or "Public chronology remains incomplete because search surfaced only a possible match, so current-role tenure is not yet confirmed."
-        sentence_two = "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
+    if match_state in {"likely_match", "partial_match"} and enrichment.inferred_tenure_years is None:
+        sentence_one = trajectory or "Public chronology is only partially established, so current-role tenure should be treated as directional rather than locked."
+        sentence_two = _mobility_follow_up_sentence(match_state=match_state)
         return polish_join(sentence_one, sentence_two)
     tenure = enrichment.inferred_tenure_years
     if tenure is not None:
@@ -675,34 +835,52 @@ def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
         sentence_one = "Fixture-backed run did not provide public chronology for the current role."
     else:
         sentence_one = "Live public-web research did not clearly establish public chronology for the current role."
-    sentence_two = "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation."
+    sentence_two = _mobility_follow_up_sentence(match_state=match_state)
     return polish_join(sentence_one, sentence_two)
 
 
 def _safe_role_fit_score(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> int:
     score = candidate_brief.role_fit.score
     signals = enrichment.recruiter_signals
-    if enrichment.identity_resolution.status == "not_verified":
-        return min(score, 3 if signals.mandate_similarity in {"direct_match", "adjacent_match"} else 2)
-    if enrichment.identity_resolution.status == "possible_match":
-        cap = 6 if signals.mandate_similarity in {"direct_match", "adjacent_match"} and signals.evidence_strength in {"strong", "moderate"} else 5
-        score = min(score, cap)
-    if _is_non_distribution_title(enrichment.current_title.lower()):
-        return min(score, 3)
-    if signals.mandate_similarity == "unclear_fit":
-        return min(score, 5)
-    if signals.mandate_similarity == "step_up_candidate":
-        return min(score, 6)
-    if signals.mandate_similarity == "adjacent_match":
-        return min(score, 7)
-    return score
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
+    if bucket == "mapping_lead":
+        if match_state == "no_reliable_match":
+            return 2
+        if signals.mandate_similarity == "step_up_candidate":
+            return 4
+        return 3
+    if bucket == "credible_adjacent_screen":
+        if signals.seniority_signal == "head_level":
+            score = min(max(score, 5), 6)
+        elif signals.seniority_signal == "director_level":
+            score = min(max(score, 4), 5)
+        else:
+            score = min(max(score, 4), 4)
+        if signals.channel_orientation == "retail":
+            score = min(score, 5)
+        return score
+
+    # Shortlist-style targets should separate clearly from adjacent screens even when
+    # identity is still "likely" rather than fully verified.
+    if match_state == "verified_match" and signals.mandate_similarity == "direct_match":
+        return 8
+    if signals.channel_orientation == "wholesale":
+        return 8 if match_state == "verified_match" else 7
+    return 7
 
 
 def _safe_role_fit_justification(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
-    sentence_one = _role_fit_strength(enrichment=enrichment)
+    sentence_one = _soften_role_fit_chain(_role_fit_strength(enrichment=enrichment))
     sentence_two = _role_fit_gap(enrichment=enrichment)
-    sentence_three = f"Screening priority: {signals.screening_priority_question}"
+    screening_question = signals.screening_priority_question.strip()
+    variants = [
+        f"The screening call should focus first on this point: {screening_question}",
+        f"The quickest diligence question is this: {screening_question}",
+        f"That is the first issue to pressure-test on a call: {screening_question}",
+    ]
+    sentence_three = choose_variant(variants, enrichment.full_name, enrichment.current_employer, screening_question, "screening_sentence")
     return polish_join(sentence_one, sentence_two, sentence_three)
 
 
@@ -711,20 +889,42 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
     angle = _hook_angle(signals)
     employer = enrichment.current_employer
     first_name = _first_name(candidate_brief.full_name)
-    if enrichment.identity_resolution.status == "not_verified":
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
+    if match_state == "no_reliable_match":
         bucket = [
-            f"Hi {first_name}, we're mapping the market around a distribution brief and could not yet verify an exact public profile, but wanted to compare whether your remit at {employer} overlaps with {angle}.",
-            f"Hi {first_name}, we're working from a partially verified market map around a distribution search and wanted to sense-check whether your work at {employer} includes {angle}.",
-            f"Hi {first_name}, we have your remit at {employer} pencilled in as a possible market-map input and wanted to confirm whether it really covers {angle}.",
-            f"Hi {first_name}, before we treat your profile as action-ready for a distribution search, I wanted to lightly check whether your work at {employer} includes {angle}.",
+            f"Hi {first_name}, we're mapping a distribution brief and wanted to sense-check whether your remit at {employer} genuinely covers {angle}.",
+            f"Hi {first_name}, we're keeping a market map around a distribution search and wanted to confirm whether your role at {employer} really includes {angle}.",
+            f"Hi {first_name}, one of our distribution briefs has some adjacency to your remit at {employer}, and I wanted to check how much it really reaches into {angle}.",
         ]
         return choose_variant(bucket, candidate_brief.full_name, employer, angle, "not_verified")
-    if enrichment.identity_resolution.status == "possible_match":
+    if bucket == "strong_shortlist":
+        shortlist_bucket = [
+            f"Hi {first_name}, we're already prioritising a small shortlist for a senior distribution mandate, and your remit at {employer} looks firmly in range, especially around {angle}; open to a brief conversation?",
+            f"Hi {first_name}, we're moving quickly on a Head of Distribution search and your current remit at {employer} looks close enough to warrant an early call, particularly around {angle}.",
+            f"Hi {first_name}, your work at {employer} reads like one of the more relevant profiles on our distribution shortlist, especially where it touches {angle}; would a quick intro be worthwhile?",
+        ]
+        return choose_variant(shortlist_bucket, candidate_brief.full_name, employer, angle, "strong_shortlist")
+    if bucket == "credible_adjacent_screen":
+        if signals.mandate_similarity == "step_up_candidate":
+            step_up_bucket = [
+                f"Hi {first_name}, we're mapping a senior distribution mandate and your remit at {employer} looks like a genuine step-up conversation, especially around {angle}.",
+                f"Hi {first_name}, your work at {employer} is not a straight replica of our brief, but it does look like the kind of stretch profile worth testing, particularly around {angle}.",
+                f"Hi {first_name}, we're speaking with a few progression-style candidates for a broader distribution brief, and your remit at {employer} stands out as a plausible step-up conversation, especially around {angle}.",
+            ]
+            return choose_variant(step_up_bucket, candidate_brief.full_name, employer, angle, "step_up_bucket")
+        adjacent_bucket = [
+            f"Hi {first_name}, we're screening a handful of adjacent distribution profiles and your remit at {employer} looks worth pressure-testing, especially around {angle}.",
+            f"Hi {first_name}, your coverage at {employer} is not a straight title match to our brief, but there is enough overlap around {angle} to justify a quick screening conversation.",
+            f"Hi {first_name}, we're speaking with a few adjacent candidates for a senior distribution role, and your remit at {employer} looks commercially relevant, especially around {angle}; open to a brief chat?",
+        ]
+        return choose_variant(adjacent_bucket, candidate_brief.full_name, employer, angle, "credible_adjacent_screen")
+    if match_state in {"likely_match", "partial_match"}:
         bucket = [
-            f"Hi {first_name}, we're mapping a distribution brief and your public profile looks like a possible overlap with {angle} at {employer}; worth a quick sense-check?",
-            f"Hi {first_name}, public search surfaced a possible match to your remit at {employer}, especially around {angle}, and I wanted to compare notes briefly.",
-            f"Hi {first_name}, we're speaking with a small number of possible market matches around a distribution search and your work at {employer} appears directionally relevant on {angle}.",
-            f"Hi {first_name}, your remit at {employer} looks close enough to our current distribution search to justify an exploratory check, particularly around {angle}.",
+            f"Hi {first_name}, we're running a distribution search and your remit at {employer} looks close enough to warrant a screening chat, especially around {angle}.",
+            f"Hi {first_name}, your current remit at {employer} looks relevant to a live distribution brief, particularly where it touches {angle}; open to a quick conversation?",
+            f"Hi {first_name}, we're speaking with a short list of relevant distribution profiles and your work at {employer} stood out on {angle}; would a brief chat be worthwhile?",
+            f"Hi {first_name}, one of our active distribution mandates overlaps with your remit at {employer}, especially around {angle}; keen to compare notes?",
         ]
         return choose_variant(bucket, candidate_brief.full_name, employer, angle, "possible_match")
     if _is_non_distribution_title(enrichment.current_title.lower()):
@@ -955,11 +1155,37 @@ def _scope_label(scope_signal: str) -> str:
     return mapping.get(scope_signal, "")
 
 
+def _uncertain_scope_phrase(scope_signal: str) -> str:
+    mapping = {
+        "national": "reported national-scope cues",
+        "anz": "reported ANZ-scope cues",
+        "global": "reported global-scope cues",
+        "regional": "reported regional-scope cues",
+        "unclear": "limited public scope cues",
+    }
+    return mapping.get(scope_signal, "limited public scope cues")
+
+
 def _trajectory_signal_sentence(enrichment: CandidateEnrichmentResult) -> str | None:
     signals = enrichment.recruiter_signals
     tenure = enrichment.inferred_tenure_years
     scope = _scope_phrase(signals.scope_signal)
     seniority = _seniority_phrase(signals.seniority_signal)
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    if match_state == "no_reliable_match":
+        variants = [
+            f"Public chronology remains unreliable because the current-profile match is not trusted, even though the task input still suggests {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
+            f"Chronology should be treated cautiously because the underlying current-profile match is still unreliable, despite the task input reading like {_uncertain_scope_phrase(signals.scope_signal)} at {seniority}.",
+            f"The visible chronology is not strong enough to trust against the current-profile match, although the task input still points toward {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "not_verified_trajectory")
+    if match_state == "partial_match":
+        variants = [
+            f"Public chronology remains incomplete because search surfaced only a possible match, although the visible remit still shows {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
+            f"Public chronology remains incomplete because only a possible match surfaced, but the public record still points to {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
+            f"Public chronology is not fully pinned down because search found only a possible match, even though the remit appears to sit within {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "possible_trajectory")
     if tenure is not None:
         variants = [
             f"Public chronology suggests approximately {tenure:.1f} years in the current role, which reads as an established {scope} remit at {seniority}.",
@@ -967,20 +1193,12 @@ def _trajectory_signal_sentence(enrichment: CandidateEnrichmentResult) -> str | 
             f"Public chronology points to about {tenure:.1f} years in seat, with {scope} and {seniority} already visible in the public record.",
         ]
         return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "tenure")
-    if enrichment.identity_resolution.status == "possible_match":
+    if match_state == "likely_match":
         variants = [
-            f"Public chronology remains incomplete because search surfaced only a possible match, although the visible remit already reads as {scope} at {seniority}.",
-            f"Public chronology remains incomplete because only a possible match surfaced, but the public record still points to {scope} and {seniority}.",
-            f"Public chronology is not fully pinned down because search found only a possible match, even though the remit appears to sit at {scope} and {seniority}.",
+            f"Chronology is not fully pinned down, but the visible profile still reads as {scope} and {seniority} rather than a speculative match.",
+            f"Public chronology remains directional rather than exact, although the current remit still reads as {scope} and {seniority}.",
         ]
-        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "possible_trajectory")
-    if enrichment.identity_resolution.status == "not_verified":
-        variants = [
-            f"Public chronology could not be confirmed because public search did not verify an exact-match profile, even though the task input points to {scope} and {seniority}.",
-            f"Public chronology remains unverified because no exact-match profile was confirmed, despite the task input reading like {scope} at {seniority}.",
-            f"Public chronology could not be established from public search, although the task input still suggests {scope} and {seniority}.",
-        ]
-        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "not_verified_trajectory")
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "likely_trajectory")
     heuristics = [
         f"Public chronology is still incomplete, but the visible remit reads like {scope} at {seniority} rather than a newly expanded assignment.",
         f"Public chronology is incomplete, although the public record does suggest {scope} and {seniority} in the current remit.",
@@ -1014,20 +1232,27 @@ def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnr
     seniority = _seniority_phrase(signals.seniority_signal)
     title = _sentence_safe_title(enrichment.current_title)
     employer = enrichment.current_employer
-    if enrichment.identity_resolution.status == "not_verified":
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    if match_state == "no_reliable_match":
         variants = [
-            f"Task input lists {candidate_brief.full_name} as {title} at {employer}, but public search did not verify an exact-match profile.",
-            f"{candidate_brief.full_name} appears in the task input as {title} at {employer}, although public search did not verify an exact-match profile.",
-            f"The task input places {candidate_brief.full_name} at {employer} as {title}, but that identity could not be verified from public search.",
+            f"Task input lists {candidate_brief.full_name} as {title} at {employer}, but the current-profile match remains unreliable in public evidence.",
+            f"{candidate_brief.full_name} appears in the task input as {title} at {employer}, although public evidence does not yet give a reliable current-profile match.",
+            f"The task input places {candidate_brief.full_name} at {employer} as {title}, but that current-profile link is still not reliable enough to treat as verified.",
         ]
         return choose_variant(variants, candidate_brief.full_name, employer, title, "career_opening")
-    if enrichment.identity_resolution.status == "possible_match":
+    if match_state == "partial_match":
         variants = [
-            f"Public search surfaced a possible match for {candidate_brief.full_name} as {title} at {employer}, but the identity remains only partially confirmed across {scope} and {seniority} signals.",
-            f"Public search returned a plausible match for {candidate_brief.full_name} at {employer} as {title}, though the identity is still only partially confirmed across {scope} and {seniority} signals.",
-            f"{candidate_brief.full_name} looks like a possible public match for {title} at {employer}, but the identity is still only partially confirmed across {scope} and {seniority} signals.",
+            f"Public search surfaced a partial match for {candidate_brief.full_name} as {title} at {employer}, with {_uncertain_scope_phrase(signals.scope_signal)} and {seniority} visible but not fully locked.",
+            f"Public search returned a plausible partial match for {candidate_brief.full_name} at {employer} as {title}, though the current-profile link is still only partially confirmed.",
+            f"{candidate_brief.full_name} looks like a partial public match for {title} at {employer}, with enough remit evidence to screen but not enough to treat as fully verified.",
         ]
         return choose_variant(variants, candidate_brief.full_name, employer, title, "possible_opening")
+    if match_state == "likely_match":
+        variants = [
+            f"Public evidence most likely places {candidate_brief.full_name} in the {title} remit at {employer}, with {_uncertain_scope_phrase(signals.scope_signal)} and {seniority} already visible.",
+            f"{candidate_brief.full_name} reads as a likely current {title} at {employer}, with public signals pointing to {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
+        ]
+        return choose_variant(variants, candidate_brief.full_name, employer, title, "likely_opening")
     if signals.channel_orientation == "unclear":
         if signals.mandate_similarity == "unclear_fit":
             return (
@@ -1045,29 +1270,46 @@ def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnr
 def _career_relevance(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
     signals = enrichment.recruiter_signals
     sell_points = _sell_point_phrase(signals)
-    if enrichment.identity_resolution.status == "not_verified":
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
+    if match_state == "no_reliable_match":
         lane_scope = _join_angle(_lane_label(signals.channel_orientation), _scope_label(signals.scope_signal))
         if lane_scope:
             variants = [
-                f"Even with identity still unverified, the task input points to {lane_scope} coverage, so this is commercially plausible but best treated as a tentative market map rather than a confirmed target; {sell_points}.",
-                f"Commercially, the task input still reads like {lane_scope} coverage, but without identity verification this remains a tentative market map and is not yet safe to action as a confirmed target; {sell_points}.",
-                f"The task input still suggests {lane_scope} exposure, which keeps the profile directionally relevant, but it should stay as a tentative market map rather than the actionable shortlist until identity is verified; {sell_points}.",
+                f"The lane still looks commercially relevant on the face of the input, especially around {lane_scope}, but this should stay as a tentative market map entry until the current-profile match is confirmed; {sell_points}.",
+                f"There is enough lane overlap to keep this as a tentative market map entry, particularly around {lane_scope}, but not enough profile certainty yet to treat it as an action-ready target; {sell_points}.",
             ]
             return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, lane_scope, "not_verified_relevance")
-        return f"Even with identity still unverified, the task input points to adjacent client-facing coverage, so this is commercially plausible but not yet safe to action; {sell_points}."
-    if enrichment.identity_resolution.status == "possible_match":
+        return f"Even with the current-profile match still unreliable, the remit is commercially adjacent enough to keep as a tentative market map entry; {sell_points}."
+    if match_state == "partial_match":
         variants = [
-            f"There is enough directional overlap to keep this as a possible match pending verification; {sell_points}, but the identity still needs confirmation.",
-            f"Commercial relevance looks directionally strong enough to keep this in the search, especially as {sell_points}, although the identity still needs confirmation.",
-            f"This remains a possible match pending verification because {sell_points}; the commercial shape is useful even though the identity is not fully confirmed.",
+            f"There is enough here to justify a screening call because {sell_points}, even though the profile should still be treated as partially matched rather than fully verified.",
+            f"Commercial relevance is strong enough to keep this in the active screen, especially as {sell_points}, with profile certainty still to be tightened.",
+            f"This is worth screening rather than shelving because {sell_points}; the remit is useful even though the profile match is only partial.",
         ]
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "possible_relevance")
+    if bucket == "strong_shortlist":
+        variants = [
+            f"This should sit in the early-call shortlist because {sell_points}; the diligence point is remit depth rather than basic relevance.",
+            f"This reads more like a first-wave call than a mapping name because {sell_points}; the remaining work is to test scope depth, not lane fit.",
+            f"This looks actionable for shortlist discussion because {sell_points}; the real question is how deep the remit runs rather than whether the lane is relevant.",
+        ]
+        return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "strong_shortlist_relevance")
+    if bucket == "credible_adjacent_screen":
+        variants = [
+            f"This is better treated as an adjacent screen than a first-wave shortlist name because {sell_points}; the overlap is real, but the transferability still needs pressure-testing.",
+            f"This belongs in the adjacent-screen bucket rather than the first shortlist cut because {sell_points}; there is enough overlap to test, but not enough to assume transferability.",
+            f"This looks directionally relevant enough for a screening call because {sell_points}, even if it still sits a step away from a clean shortlist profile.",
+        ]
+        return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "adjacent_screen_relevance")
+    if match_state == "likely_match":
+        return f"This looks worth calling rather than simply mapping because {sell_points}, with the remaining uncertainty sitting more around scope detail than identity."
     if signals.mandate_similarity == "direct_match":
-        return f"Strong alignment with the {candidate_brief.role_fit.role} brief on visible lane and scope; {sell_points}."
+        return f"Visible lane and scope line up well with the {candidate_brief.role_fit.role} brief; {sell_points}."
     if signals.mandate_similarity == "adjacent_match":
-        return f"Strong commercial relevance here: {sell_points}; not a clean like-for-like match, but clearly adjacent."
+        return f"This is an adjacent but credible screen because {sell_points}; not like-for-like, but close enough to test quickly."
     if signals.mandate_similarity == "step_up_candidate":
-        return f"More of a progression case than a replica remit; even so, {sell_points}."
+        return f"This is more of a progression case than a replica remit, but still worth testing because {sell_points}."
     if _is_non_distribution_title(enrichment.current_title.lower()):
         return "This looks more like an adjacent investment-platform profile than a proven distribution candidate, so any relevance to the brief should be treated as tentative."
     return f"Enough substance here to justify a screening call; {sell_points}."
@@ -1083,19 +1325,56 @@ def _role_fit_strength(*, enrichment: CandidateEnrichmentResult) -> str:
     employer = enrichment.current_employer
     sell_points = _sell_point_phrase(signals)
     lane_scope = _join_angle(_scope_label(signals.scope_signal), f"{_lane_label(signals.channel_orientation)} coverage").strip()
-    if enrichment.identity_resolution.status == "not_verified":
-        return f"Market map only as an unverified market input; {title} at {employer} looks commercially plausible, but public search did not confirm that it maps to an exact-match profile."
-    if enrichment.identity_resolution.status == "possible_match":
-        return f"Possible match pending verification; {title} at {employer} may bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}, but identity confirmation still comes first."
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    bucket = _priority_bucket(enrichment=enrichment)
+    if match_state == "no_reliable_match":
+        return f"Lower-priority mapping lead; the task input suggests commercially relevant {lane_scope or 'distribution'} exposure at {employer}, but the current-profile match is still unreliable."
+    if bucket == "strong_shortlist":
+        return f"Shortlist-style target; {title} at {employer} brings one of the cleaner overlaps with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}."
+    if bucket == "credible_adjacent_screen":
+        return f"Adjacent screen rather than first-wave shortlist; {title} at {employer} brings useful overlap with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}."
+    if match_state == "partial_match":
+        return f"Worth a screening call; {title} at {employer} may bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}, even though the profile match is only partial."
+    if match_state == "likely_match":
+        return f"Screen-worthy likely match; {title} at {employer} appears to bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if signals.mandate_similarity == "direct_match":
         return f"Credible shortlist candidate; current remit at {employer} brings relevant {lane_scope or 'distribution'}, and {sell_points}."
     if signals.mandate_similarity == "adjacent_match":
-        return f"Possible match pending verification; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
+        return f"Adjacent but credible target; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if signals.mandate_similarity == "step_up_candidate":
         return f"Adjacent step-up conversation; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if _is_non_distribution_title(enrichment.current_title.lower()):
         return f"Market map only; {title} at {employer} points more to investment-platform exposure than to a verified client-facing commercial remit."
     return f"Possible match pending verification; {title} at {employer} leaves the distribution relevance only partially established, although {sell_points}."
+
+
+def _priority_bucket(*, enrichment: CandidateEnrichmentResult) -> str:
+    # Internal recruiter-priority bucket used to separate shortlist, adjacent screen,
+    # and mapping profiles without changing the PPP output schema.
+    signals = enrichment.recruiter_signals
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    title = enrichment.current_title.lower()
+
+    if match_state == "no_reliable_match" or signals.mandate_similarity == "unclear_fit":
+        return "mapping_lead"
+    if _is_non_distribution_title(title):
+        return "mapping_lead"
+
+    has_head_distribution_title = "head of distribution" in title
+    head_like_scope = signals.seniority_signal == "head_level" and signals.scope_signal in {"national", "anz", "regional", "global"}
+    channel_close = signals.channel_orientation in {"wholesale", "institutional", "mixed"}
+
+    if (
+        signals.mandate_similarity == "direct_match"
+        or (has_head_distribution_title and head_like_scope and match_state in {"verified_match", "likely_match", "partial_match"})
+        or (signals.channel_orientation == "wholesale" and head_like_scope and signals.mandate_similarity == "adjacent_match")
+    ):
+        return "strong_shortlist"
+
+    if signals.mandate_similarity in {"adjacent_match", "step_up_candidate"}:
+        return "credible_adjacent_screen"
+
+    return "mapping_lead"
 
 
 def _role_fit_gap(*, enrichment: CandidateEnrichmentResult) -> str:
@@ -1114,6 +1393,107 @@ def _clean_firm_aum_context(statement: str, *, employer: str) -> str:
     if not cleaned.endswith("."):
         cleaned += "."
     return cleaned
+
+
+def _qualitative_firm_context(*, enrichment: CandidateEnrichmentResult, statement: str) -> str:
+    employer = enrichment.current_employer
+    lowered = statement.lower()
+    firm_descriptor = _firm_descriptor_from_context(employer=employer, statement=statement, channel_orientation=enrichment.recruiter_signals.channel_orientation)
+    market_descriptor = _firm_market_context_phrase(lowered)
+    channel_descriptor = _firm_channel_context_phrase(enrichment)
+    uncertainty_descriptor = choose_variant(
+        [
+            "Based on firm type and sector context, exact AUM is unavailable here, so the better recruiter read is firm type, market position, and channel context.",
+            "Exact AUM is unavailable here; the useful takeaway is firm profile, market position, and channel mix rather than a precise figure.",
+            "Firm profile indicates useful market context here even though exact AUM is unavailable, so the note stays qualitative.",
+        ],
+        employer,
+        firm_descriptor,
+        "firm_context_uncertainty",
+    )
+
+    openings = [
+        f"{employer} looks like {firm_descriptor}",
+        f"{employer} reads as {firm_descriptor}",
+        f"{employer} appears to be {firm_descriptor}",
+    ]
+    parts = [choose_variant(openings, employer, firm_descriptor, "firm_context_opening")]
+    if market_descriptor:
+        parts.append(market_descriptor)
+    if channel_descriptor:
+        parts.append(channel_descriptor)
+    parts.append(uncertainty_descriptor)
+    return polish_join(*parts)
+
+
+def _firm_descriptor_from_context(*, employer: str, statement: str, channel_orientation: str) -> str:
+    lowered = statement.lower()
+    if "global asset manager" in lowered:
+        return "a large global asset manager"
+    if "wealth and asset-management platform" in lowered:
+        return "an established Australian wealth and asset-management platform"
+    if "active manager" in lowered:
+        return "an established Australian active manager"
+    if "financial-services platform" in lowered:
+        return "an established Australian financial-services platform"
+    if "asset-management brand" in lowered:
+        return "a visible Australian asset-management brand"
+    if "funds-management platform" in lowered:
+        return "an established diversified funds-management platform"
+    if channel_orientation == "wholesale":
+        return "an established funds-management platform with intermediary distribution relevance"
+    if channel_orientation == "institutional":
+        return "an established asset manager with institutional distribution relevance"
+    return "an established diversified funds-management platform"
+
+
+def _firm_market_context_phrase(lowered_statement: str) -> str:
+    if "retirement-income" in lowered_statement or "annuities" in lowered_statement:
+        return "with a visible retirement-income and specialist product footprint."
+    if "institutional credibility" in lowered_statement:
+        return "with obvious institutional credibility in market."
+    if "visible market scale" in lowered_statement:
+        return "with visible market scale in Australian funds management."
+    if "market footprint" in lowered_statement:
+        return "with a clear market footprint."
+    if "market presence" in lowered_statement:
+        return "with a recognizable market presence."
+    if "distribution visibility" in lowered_statement:
+        return "with clear distribution visibility."
+    return "with identifiable market relevance in funds management."
+
+
+def _firm_channel_context_phrase(enrichment: CandidateEnrichmentResult) -> str:
+    channel = enrichment.recruiter_signals.channel_orientation
+    if channel == "wholesale":
+        variants = [
+            "The role sits in wholesale and intermediary distribution rather than a pure institutional-only lane.",
+            "The visible channel mix is intermediary and wholesale-led rather than institutional-only.",
+            "The remit is closer to intermediary and wholesale distribution than to a pure institutional coverage role.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "firm_channel_wholesale")
+    if channel == "institutional":
+        variants = [
+            "The remit is closer to institutional coverage and allocator-facing distribution than to retail-only sales.",
+            "The visible lane is institutional and allocator-facing rather than adviser-led retail sales.",
+            "The role context is more institutional and client-allocation facing than retail-only distribution.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "firm_channel_institutional")
+    if channel == "wealth":
+        variants = [
+            "The visible channel context is wealth and adviser-led rather than a pure institutional remit.",
+            "The channel mix reads more wealth and intermediary-led than institutional-only.",
+            "The visible remit sits closer to adviser and wealth distribution than to a pure institutional lane.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "firm_channel_wealth")
+    if channel == "mixed":
+        variants = [
+            "The visible channel context spans multiple distribution lanes, which is useful for a broad head-of-distribution mandate.",
+            "The remit appears to cut across more than one distribution lane, which matters for a broad commercial brief.",
+            "The visible channel mix is broader than a single-lane sales remit, which is relevant to a head-of-distribution search.",
+        ]
+        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, "firm_channel_mixed")
+    return ""
 
 
 def _normalize_numeric_aum_context(statement: str, *, employer: str) -> str:
@@ -1175,16 +1555,80 @@ def _gap_boundary_sentence(gaps: list[str]) -> str:
     if not gaps:
         return "What remains unclear from public evidence is the exact commercial scope behind the remit."
     if len(gaps) == 1:
-        return f"What remains unclear from public evidence is {_strip_gap_qualifier(gaps[0])}."
-    return f"What remains unclear from public evidence is {_strip_gap_qualifier(gaps[0])}; {_strip_gap_qualifier(gaps[1])} also needs testing."
+        gap = _strip_gap_qualifier(gaps[0])
+        variants = [
+            f"The main point to test on a first call is {gap}, which still needs confirmation.",
+            f"The first diligence point is {gap}, which should be confirmed in conversation.",
+            f"The initial screening focus should be {gap}, because that still needs confirmation.",
+        ]
+        return choose_variant(variants, gap, "single_gap_boundary")
+    primary_gap = _strip_gap_qualifier(gaps[0])
+    secondary_gap = _strip_gap_qualifier(gaps[1])
+    variants = [
+        f"The main point to test on a first call is {primary_gap}; {secondary_gap} also still needs confirmation.",
+        f"The first diligence point is {primary_gap}; {secondary_gap} should be confirmed in conversation straight after that.",
+        f"The initial screening focus should be {primary_gap}, with {secondary_gap} as the next point that still needs confirmation.",
+    ]
+    return choose_variant(variants, primary_gap, secondary_gap, "multi_gap_boundary")
 
 
 def _role_gap_sentence(gaps: list[str]) -> str:
     if not gaps:
         return "Key unresolved point: the exact scope behind the remit."
     if len(gaps) == 1:
-        return f"Key unresolved point: {_strip_gap_qualifier(gaps[0])}."
-    return f"Key unresolved point: {_strip_gap_qualifier(gaps[0])}; {_strip_gap_qualifier(gaps[1])} also remains unverified."
+        gap = _strip_gap_qualifier(gaps[0])
+        variants = [
+            f"The main fit gap is {gap}.",
+            f"The unresolved commercial question is {gap}.",
+            f"The biggest diligence gap is {gap}.",
+        ]
+        return choose_variant(variants, gap, "single_role_gap")
+    primary_gap = _strip_gap_qualifier(gaps[0])
+    secondary_gap = _strip_gap_qualifier(gaps[1])
+    variants = [
+        f"The main fit gap is {primary_gap}; {secondary_gap} also remains to be tested.",
+        f"The biggest diligence gap is {primary_gap}; {secondary_gap} should be checked alongside it.",
+        f"The unresolved commercial issue is {primary_gap}, with {secondary_gap} as the next point to test.",
+    ]
+    return choose_variant(variants, primary_gap, secondary_gap, "multi_role_gap")
+
+
+def _mobility_follow_up_sentence(*, match_state: str) -> str:
+    variants = {
+        "no_reliable_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach framed as exploratory rather than timely.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, not inferred from the task input alone.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any priority call is assumed.",
+        ],
+        "partial_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, even if the commercial overlap looks usable.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from partial chronology.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation once profile certainty is tightened.",
+        ],
+        "likely_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than assumed from tenure alone.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even where chronology looks directionally solid.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before call priority is calibrated too tightly.",
+        ],
+        "verified_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from a settled remit.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even though the role chronology is clearer.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation instead of being read off tenure alone.",
+        ],
+    }
+    bucket = variants.get(match_state, variants["likely_match"])
+    return choose_variant(bucket, match_state, "mobility_follow_up")
+
+
+def _soften_role_fit_chain(text: str) -> str:
+    # Keep the same evidence and ranking logic, but break up stacked "..., and ..., and ..."
+    # patterns so the exported note reads more like recruiter judgment than prompt residue.
+    softened = text
+    softened = re.sub(r", and (the remit already sits\b)", r"; \1", softened)
+    softened = re.sub(r", and (the current role is senior enough\b)", r"; \1", softened)
+    softened = re.sub(r", and (the visible remit reads\b)", r"; \1", softened)
+    softened = re.sub(r", and (public evidence points to\b)", r"; \1", softened)
+    return softened
 
 
 def _strip_gap_qualifier(gap: str) -> str:
@@ -1222,6 +1666,10 @@ def _naturalize_sell_point(point: str) -> str:
         "current title points to broad distribution leadership exposure": "the title points to broad distribution leadership exposure",
         "the remit already sits close to a head-of-distribution brief": "the remit already sits close to a head-of-distribution brief",
         "the profile suggests stretch potential from channel ownership into broader distribution leadership": "the profile suggests stretch potential beyond individual channel ownership",
+        "public evidence points to national scope": "the visible remit reads as national in scope",
+        "public evidence points to anz scope": "the visible remit reads as ANZ in scope",
+        "public evidence points to global scope": "the visible remit reads as global in scope",
+        "public evidence points to regional scope": "the visible remit reads as regional in scope",
     }
     return mapping.get(point, point)
 

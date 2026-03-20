@@ -7,6 +7,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from app.llm.anthropic_client import ClaudeClient
 from app.ppp.enrichment import (
     CandidatePublicProfileLookupInput,
     CandidatePublicProfileLookupTool,
@@ -23,32 +24,119 @@ from app.ppp.pipeline import (
 from app.ppp.qa import run_bundle_qa, validate_output_bundle
 from app.ppp.research import ResearchClientError, TavilyResearchClient
 from app.ppp.role_spec import load_role_spec_json_text, normalize_role_spec, parse_role_spec_text
-from app.ppp.schema import validate_output_document
-from app.ppp.validator import validate_and_repair_candidate_payload
+from app.ppp.schema import validate_candidate_brief, validate_output_document
+from app.ppp.validator import parse_candidate_response, validate_and_repair_candidate_payload
 
 
 def _candidate_from_prompt(payload: dict[str, object]) -> dict[str, str]:
-    research_package = payload["research_package"]
-    assert isinstance(research_package, dict)
-    identity = research_package["candidate_identity"]
-    assert isinstance(identity, dict)
+    if "research_package" in payload:
+        research_package = payload["research_package"]
+        assert isinstance(research_package, dict)
+        identity = research_package["candidate_identity"]
+        assert isinstance(identity, dict)
+        return {
+            "full_name": str(identity["full_name"]),
+            "current_employer": str(identity["current_employer"]),
+            "current_title": str(identity["current_title"]),
+        }
+    if "candidate_identity" in payload:
+        identity = payload["candidate_identity"]
+        assert isinstance(identity, dict)
+        normalized = payload.get("normalized_evidence", {})
+        assert isinstance(normalized, dict)
+        return {
+            "full_name": str(identity["full_name"]),
+            "current_employer": str(normalized.get("verified_employer") or identity.get("current_employer") or ""),
+            "current_title": str(normalized.get("verified_title") or identity.get("current_title") or ""),
+        }
+    minimal_schema = payload["minimal_required_schema"]
+    assert isinstance(minimal_schema, dict)
+    current_role = minimal_schema["current_role"]
+    assert isinstance(current_role, dict)
     return {
-        "full_name": str(identity["full_name"]),
-        "current_employer": str(identity["current_employer"]),
-        "current_title": str(identity["current_title"]),
+        "full_name": str(minimal_schema["full_name"]),
+        "current_employer": str(current_role["employer"]),
+        "current_title": str(current_role["title"]),
     }
 
 
 def _allowed_facts_from_prompt(payload: dict[str, object]) -> dict[str, object]:
-    allowed_facts = payload["allowed_facts"]
-    assert isinstance(allowed_facts, dict)
-    return allowed_facts
+    if "allowed_facts" in payload:
+        allowed_facts = payload["allowed_facts"]
+        assert isinstance(allowed_facts, dict)
+        return allowed_facts
+    if "minimal_required_schema" in payload:
+        minimal_schema = payload["minimal_required_schema"]
+        assert isinstance(minimal_schema, dict)
+        current_role = minimal_schema["current_role"]
+        assert isinstance(current_role, dict)
+        return {
+            "current_role": {
+                "title": current_role["title"],
+                "employer": current_role["employer"],
+            },
+            "tenure_years": {
+                "value": current_role["tenure_years"],
+            },
+            "firm_aum_context": {
+                "preferred_statement": minimal_schema["firm_aum_context"],
+            },
+        }
+    normalized = payload["normalized_evidence"]
+    assert isinstance(normalized, dict)
+    current_role = payload["required_output_shape"]["current_role"]
+    assert isinstance(current_role, dict)
+    return {
+        "current_role": {
+            "title": current_role["title"],
+            "employer": current_role["employer"],
+        },
+        "tenure_years": {
+            "value": normalized["tenure_years"],
+        },
+        "firm_aum_context": {
+            "preferred_statement": payload["firm_aum_context"],
+        },
+    }
 
 
 def _allowed_fact_section(allowed_facts: dict[str, object], key: str) -> dict[str, Any]:
     section = allowed_facts[key]
     assert isinstance(section, dict)
     return cast(dict[str, Any], section)
+
+
+def _candidate_id_from_prompt(payload: dict[str, object]) -> str:
+    if "schema_rules" in payload:
+        schema_rules = payload["schema_rules"]
+        assert isinstance(schema_rules, dict)
+        return str(schema_rules["candidate_id"])
+    if "candidate_identity" in payload:
+        identity = payload["candidate_identity"]
+        assert isinstance(identity, dict)
+        return str(identity["candidate_id"])
+    minimal_schema = payload["minimal_required_schema"]
+    assert isinstance(minimal_schema, dict)
+    return str(minimal_schema["candidate_id"])
+
+
+def _fake_normalized_evidence_json(user_prompt: str) -> str:
+    payload = json.loads(user_prompt)
+    identity = payload["candidate_identity"]
+    assert isinstance(identity, dict)
+    return json.dumps(
+        {
+            "match_confidence_state": "verified_match",
+            "strongest_title_employer_signal": f"{identity['current_title']} at {identity['current_employer']}",
+            "public_profile_confidence_notes": ["Verified in test stub."],
+            "firm_context_confidence_notes": ["Firm context available in test stub."],
+            "role_relevant_distribution_signals": ["Relevant distribution signal in test stub."],
+            "uncertainty_notes": ["Some scope details remain uncertain."],
+            "verified_employer": identity["current_employer"],
+            "verified_title": identity["current_title"],
+            "tenure_years": 2.5,
+        }
+    )
 
 
 def _build_enrichment(
@@ -211,6 +299,107 @@ def test_role_spec_helpers_normalize_and_parse_text() -> None:
     assert loaded["role"] == "Head of Distribution / National BDM"
 
 
+def test_claude_client_handles_real_tool_roundtrip() -> None:
+    class FakeBlock:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class FakeResponse:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeMessagesAPI:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                assert "tools" in kwargs
+                return FakeResponse(
+                    [
+                        FakeBlock(
+                            type="tool_use",
+                            id="toolu_1",
+                            name="normalize_candidate_evidence",
+                            input={"candidate_identity": {"candidate_id": "candidate_1"}, "research_package": {}, "role_spec": {}},
+                        )
+                    ]
+                )
+            tool_result_blocks = kwargs["messages"][-1]["content"]
+            assert tool_result_blocks[0]["type"] == "tool_result"
+            payload = json.loads(tool_result_blocks[0]["content"])
+            assert payload["match_confidence_state"] == "verified_match"
+            return FakeResponse([FakeBlock(type="text", text='{"candidate_id":"candidate_1"}')])
+
+    client = ClaudeClient(api_key=None)
+    client._client = type("FakeAnthropicClient", (), {"messages": FakeMessagesAPI()})()
+
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+
+    text = client.run_tool_phase_once(
+        system_prompt="system",
+        user_prompt=json.dumps({"candidate_identity": {"candidate_id": "candidate_1"}, "research_package": {}, "role_spec": {}}),
+        model="claude-sonnet-4-5",
+        max_tokens=300,
+        extra_payload={},
+        tool_definitions=[
+            {
+                "name": "normalize_candidate_evidence",
+                "description": "Normalize evidence",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ],
+        tool_choice={"type": "any"},
+        tool_runner=lambda tool_name, tool_input: (
+            tool_calls.append((tool_name, tool_input)) or {"match_confidence_state": "verified_match"}
+        ),
+    )
+
+    assert json.loads(text)["candidate_id"] == "candidate_1"
+    assert tool_calls[0][0] == "normalize_candidate_evidence"
+
+
+def test_validate_candidate_brief_rejects_null_tenure() -> None:
+    with pytest.raises(ValidationError):
+        validate_candidate_brief(
+            {
+                "candidate_id": "candidate_1",
+                "full_name": "Example Candidate",
+                "current_role": {
+                    "title": "Head of Distribution",
+                    "employer": "Example AM",
+                    "tenure_years": None,
+                },
+                "career_narrative": "Sentence one. Sentence two. Sentence three.",
+                "experience_tags": ["distribution"],
+                "firm_aum_context": "Example AM context.",
+                "mobility_signal": {"score": 3, "rationale": "Sentence one. Sentence two."},
+                "role_fit": {
+                    "role": "Head of Distribution / National BDM",
+                    "score": 6,
+                    "justification": "Sentence one. Sentence two. Sentence three.",
+                },
+                "outreach_hook": "One sentence only.",
+            }
+        )
+
+
+def test_parse_candidate_response_rejects_control_packet() -> None:
+    with pytest.raises(ValueError, match="control packet"):
+        parse_candidate_response(
+            json.dumps(
+                {
+                    "task": "Generate candidate briefing",
+                    "reasoning_contract": {"use_only_supported_claims": True},
+                    "schema_rules": {"candidate_id": "candidate_1"},
+                    "candidate_identity": {"candidate_id": "candidate_1", "full_name": "Example Candidate"},
+                }
+            )
+        )
+
+
 def test_resolve_research_mode_defaults_to_live_when_tavily_key_present(monkeypatch) -> None:
     monkeypatch.setattr("app.ppp.pipeline.settings.tavily_api_key", "test-tavily-key")
     monkeypatch.setattr("app.ppp.pipeline.settings.ppp_research_mode", "fixture")
@@ -239,7 +428,7 @@ def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
         candidate = _candidate_from_prompt(payload)
         allowed_facts = _allowed_facts_from_prompt(payload)
         tenure = _allowed_fact_section(allowed_facts, "tenure_years")
-        candidate_id = payload["schema_rules"]["candidate_id"]
+        candidate_id = _candidate_id_from_prompt(payload)
         return json.dumps(
             {
                 "candidate_id": candidate_id,
@@ -273,6 +462,7 @@ def test_run_ppp_pipeline_writes_valid_output(tmp_path, monkeypatch) -> None:
         )
 
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", fake_generate_text)
+    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.run_tool_phase_once", lambda self, **kwargs: _fake_normalized_evidence_json(kwargs["user_prompt"]))
 
     result = run_ppp_pipeline(
         input_path=str(input_path),
@@ -713,9 +903,9 @@ def test_stabilized_output_handles_not_verified_identity_as_unverified_market_in
     candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
 
     assert candidate.role_fit.score <= 2
-    assert "did not verify an exact-match profile" in candidate.career_narrative.lower()
-    assert "unverified market input" in candidate.role_fit.justification.lower()
-    assert "could not yet verify an exact public profile" in candidate.outreach_hook.lower() or "partially verified market map" in candidate.outreach_hook.lower()
+    assert "does not yet give a reliable current-profile match" in candidate.career_narrative.lower() or "current-profile link is still not reliable enough" in candidate.career_narrative.lower()
+    assert "lower-priority mapping lead" in candidate.role_fit.justification.lower()
+    assert "distribution brief" in candidate.outreach_hook.lower() or "distribution briefs" in candidate.outreach_hook.lower()
 
 
 def test_not_verified_career_narrative_still_explains_lane_relevance(tmp_path) -> None:
@@ -753,8 +943,8 @@ def test_not_verified_career_narrative_still_explains_lane_relevance(tmp_path) -
     candidate = _stabilize_candidate_brief(candidate_brief=output.candidates[0], enrichment=enrichment)
     lowered = candidate.career_narrative.lower()
     assert "institutional" in lowered
-    assert "tentative market map" in lowered
-    assert "confirmed target" in lowered
+    assert "tentative market map entry" in lowered
+    assert "action-ready target" in lowered
 
 
 def test_recruiter_usefulness_qa_accepts_lane_relevance_boundary_structure(tmp_path) -> None:
@@ -1190,6 +1380,82 @@ def test_tavily_research_client_marks_possible_match_when_employer_is_missing() 
     assert isinstance(payload.fixture["possible_public_snippets"], list)
 
 
+def test_tavily_research_client_rejects_cross_company_firm_material_even_when_target_name_appears() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        query = str(payload["query"])
+        if "assets under management" in query:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Perpetual FY23 Financial Results",
+                            "url": "https://company-announcements.afr.com/asx/ppt/02dce609-4209-11ee-8af2-5edd2b3cbcdb.pdf",
+                            "content": "Perpetual FY23 Financial Results. Total AUM of $212.1 billion. Includes commentary that Pendal refers to the asset management business in Australia.",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Andrew Swan distribution profile",
+                        "url": "https://example.com/profile",
+                        "content": "Andrew Swan is a distribution executive in Australian asset management with institutional sales experience.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_1",
+            full_name="Andrew Swan",
+            current_employer="Pendal Group",
+            current_title="Head of Distribution",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    firm_context = payload.fixture["firm_aum_context"]
+    assert isinstance(firm_context, str)
+    assert "$212.1 billion" not in firm_context
+    assert "exact AUM" in firm_context
+
+
+def test_tavily_research_client_history_bio_does_not_count_as_current_role_match() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Cathy Hales - Business News",
+                        "url": "https://example.com/business-news/cathy-hales",
+                        "content": "Cathy Hales was the global head of Fidante Partners, following senior roles with Deutsche Asset Management, Colonial First State and BT Funds Management.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_2",
+            full_name="Cathy Hales",
+            current_employer="Perpetual Limited",
+            current_title="Head of Retail Sales",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    assert payload.fixture["identity_resolution_status"] == "not_verified"
+
+
 def test_tavily_research_client_marks_not_verified_when_no_exact_profile_is_found() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -1269,10 +1535,8 @@ def test_tavily_research_client_extracts_billion_style_aum_context() -> None:
 
     firm_context = payload.fixture["firm_aum_context"]
     assert isinstance(firm_context, str)
-    assert "$44.6 billion" in firm_context
-    assert "estimated AUM" in firm_context
-    assert "still subject to verification" in firm_context
-    assert "Money Management This meant" not in firm_context
+    assert "$44.6 billion" not in firm_context
+    assert "exact AUM figure should still be verified manually" in firm_context
 
 
 def test_tavily_research_client_extracts_large_currency_amount_aum_context() -> None:
@@ -1321,6 +1585,53 @@ def test_tavily_research_client_extracts_large_currency_amount_aum_context() -> 
     assert "$2,104,590,054" in firm_context
     assert "estimated AUM" in firm_context
     assert "still subject to verification" in firm_context
+
+
+def test_tavily_research_client_accepts_numeric_aum_from_results_style_context() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        query = str(payload["query"])
+        if "assets under management" in query:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Perpetual FY23 Financial Results",
+                            "url": "https://example.com/perpetual-results",
+                            "content": "Perpetual FY23 Financial Results. Total AUM of $212.1 billion as of 30 June 2023 across the asset management platform.",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Cathy Hales profile",
+                        "url": "https://example.com/profile",
+                        "content": "Cathy Hales is Head of Retail Sales at Perpetual Limited.",
+                    }
+                ]
+            },
+        )
+
+    client = TavilyResearchClient(api_key="test-key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    payload = client.lookup_candidate(
+        CandidatePublicProfileLookupInput(
+            candidate_id="candidate_2",
+            full_name="Cathy Hales",
+            current_employer="Perpetual Limited",
+            current_title="Head of Retail Sales",
+            linkedin_url="https://example.com/linkedin",
+        )
+    )
+
+    firm_context = payload.fixture["firm_aum_context"]
+    assert isinstance(firm_context, str)
+    assert "$212.1 billion" in firm_context
+    assert "estimated AUM" in firm_context
 
 
 def test_tavily_research_client_rejects_aum_attributed_to_other_entity() -> None:
@@ -1459,7 +1770,7 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
         candidate = _candidate_from_prompt(payload)
         allowed_facts = _allowed_facts_from_prompt(payload)
         tenure = _allowed_fact_section(allowed_facts, "tenure_years")
-        candidate_id = payload["schema_rules"]["candidate_id"]
+        candidate_id = _candidate_id_from_prompt(payload)
         return json.dumps(
             {
                 "candidate_id": candidate_id,
@@ -1490,6 +1801,7 @@ def test_run_ppp_pipeline_writes_enrichment_artifacts(tmp_path, monkeypatch) -> 
         )
 
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", fake_generate_text)
+    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.run_tool_phase_once", lambda self, **kwargs: _fake_normalized_evidence_json(kwargs["user_prompt"]))
 
     result = run_ppp_pipeline(
         input_path=str(input_path),
@@ -1542,7 +1854,7 @@ def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monke
             return '{"candidate_id": "candidate_1"}'
         return json.dumps(
             {
-                "candidate_id": payload["schema_rules"]["candidate_id"],
+                "candidate_id": _candidate_id_from_prompt(payload),
                 "full_name": candidate["full_name"],
                 "current_role": {
                     "title": candidate["current_title"],
@@ -1573,6 +1885,7 @@ def test_run_ppp_pipeline_retries_after_invalid_first_generation(tmp_path, monke
         )
 
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", fake_generate_text)
+    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.run_tool_phase_once", lambda self, **kwargs: _fake_normalized_evidence_json(kwargs["user_prompt"]))
 
     run_ppp_pipeline(
         input_path=str(input_path),
@@ -1714,7 +2027,7 @@ def test_run_ppp_pipeline_writes_failure_artifact_on_candidate_error(tmp_path, m
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
     def fake_generate_text(self, *, system_prompt: str, user_prompt: str, model: str, max_tokens: int, extra=None):
         payload = json.loads(user_prompt)
-        candidate_id = payload["schema_rules"]["candidate_id"]
+        candidate_id = _candidate_id_from_prompt(payload)
         candidate = _candidate_from_prompt(payload)
         allowed_facts = _allowed_facts_from_prompt(payload)
         tenure = _allowed_fact_section(allowed_facts, "tenure_years")
@@ -1746,21 +2059,22 @@ def test_run_ppp_pipeline_writes_failure_artifact_on_candidate_error(tmp_path, m
         )
 
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", fake_generate_text)
+    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.run_tool_phase_once", lambda self, **kwargs: _fake_normalized_evidence_json(kwargs["user_prompt"]))
 
-    result = run_ppp_pipeline(
-        input_path=str(input_path),
-        output_path=str(tmp_path / "output.json"),
-        role_spec_path=str(role_spec_path),
-        model="claude-sonnet-4-5",
-        intermediate_dir=str(intermediate_dir),
-        research_mode="fixture",
-    )
+    with pytest.raises(PPPTaskError, match="expected exactly 5 validated candidates"):
+        run_ppp_pipeline(
+            input_path=str(input_path),
+            output_path=str(tmp_path / "output.json"),
+            role_spec_path=str(role_spec_path),
+            model="claude-sonnet-4-5",
+            intermediate_dir=str(intermediate_dir),
+            research_mode="fixture",
+        )
 
     assert (intermediate_dir / "candidate_1_error.json").exists()
-    assert result.delivery_status == "partial_success"
-    assert len(result.candidates) == 4
-    assert result.failed_candidates[0].candidate_id == "candidate_1"
-    assert result.failed_candidates[0].stage == "generation"
+    run_report = json.loads((intermediate_dir / "run_report.json").read_text(encoding="utf-8"))
+    assert run_report["failed_candidates"][0]["candidate_id"] == "candidate_1"
+    assert run_report["failed_candidates"][0]["stage"] == "generation"
 
 
 def test_run_ppp_pipeline_raises_when_all_candidates_fail(tmp_path, monkeypatch) -> None:
@@ -1780,6 +2094,7 @@ def test_run_ppp_pipeline_raises_when_all_candidates_fail(tmp_path, monkeypatch)
 
     monkeypatch.setattr("app.ppp.pipeline.settings.anthropic_api_key", "test-key")
     monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.generate_text", lambda *args, **kwargs: '{"candidate_id":"candidate_1"}')
+    monkeypatch.setattr("app.ppp.pipeline.ClaudeClient.run_tool_phase_once", lambda self, **kwargs: _fake_normalized_evidence_json(kwargs["user_prompt"]))
 
     with pytest.raises(PPPTaskError, match="failed for all candidates"):
         run_ppp_pipeline(

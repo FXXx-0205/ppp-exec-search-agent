@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.ppp.models import ROLE_NAME
 
 
 class CurrentRole(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     employer: str
-    tenure_years: float | None
+    tenure_years: float
 
     @field_validator("title", "employer")
     @classmethod
@@ -20,8 +23,19 @@ class CurrentRole(BaseModel):
             raise ValueError("Field cannot be empty.")
         return normalized
 
+    @field_validator("tenure_years")
+    @classmethod
+    def _require_numeric_tenure(cls, value: float) -> float:
+        if not isfinite(value):
+            raise ValueError("tenure_years must be numeric.")
+        if value < 0:
+            raise ValueError("tenure_years must be zero or greater.")
+        return round(float(value), 1)
+
 
 class MobilitySignal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     score: int = Field(ge=1, le=5)
     rationale: str
 
@@ -35,6 +49,8 @@ class MobilitySignal(BaseModel):
 
 
 class RoleFit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     role: str = ROLE_NAME
     score: int = Field(ge=1, le=10)
     justification: str
@@ -57,6 +73,8 @@ class RoleFit(BaseModel):
 
 
 class CandidateBrief(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     candidate_id: str
     full_name: str
     current_role: CurrentRole
@@ -85,14 +103,14 @@ class CandidateBrief(BaseModel):
 
 
 class PPPOutput(BaseModel):
-    candidates: list[CandidateBrief]
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateBrief] = Field(min_length=5, max_length=5)
 
     @model_validator(mode="after")
     def _validate_candidate_count(self) -> "PPPOutput":
-        if not self.candidates:
-            raise ValueError("output.json must contain at least one candidate.")
-        if len(self.candidates) > 5:
-            raise ValueError("output.json cannot contain more than five candidates.")
+        if len(self.candidates) != 5:
+            raise ValueError("output.json must contain exactly five candidates.")
         return self
 
 

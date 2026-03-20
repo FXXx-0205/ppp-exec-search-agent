@@ -26,6 +26,7 @@ def polish_text(text: str) -> str:
     cleaned = cleaned.replace("a institutional", "an institutional")
     cleaned = cleaned.replace("a ANZ", "an ANZ")
     cleaned = cleaned.replace("a adjacent", "an adjacent")
+    cleaned = cleaned.replace("an useful", "a useful")
     cleaned = cleaned.replace("and and", "and")
     return cleaned.strip()
 

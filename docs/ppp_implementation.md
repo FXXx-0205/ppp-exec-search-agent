@@ -1,6 +1,6 @@
 # PPP Task Implementation Notes
 
-This repository now includes a dedicated PPP assessment path that sits alongside the existing executive-search workflow system.
+This repository now includes a dedicated PPP assessment path focused on the PPP briefing workflow.
 
 ## Directory structure
 
@@ -8,12 +8,14 @@ This repository now includes a dedicated PPP assessment path that sits alongside
   PPP-specific models and pipeline logic.
 - `scripts/run_ppp_task.py`
   CLI entrypoint for non-technical execution.
-- `app/ui/ppp_task_app.py`
-  Minimal Streamlit runner for upload-and-run usage.
+- `streamlit_app.py`
+  Streamlit runner for upload-and-run usage.
 - `data/ppp/candidates.csv`
   Default candidate input file.
 - `data/ppp/role_spec.json`
   Default role specification for role-fit evaluation.
+- `.streamlit/ppp_local_state.json`
+  Local gitignored UI state for cached API keys on the current machine.
 
 ## Current scope
 
@@ -40,6 +42,8 @@ Phase 2 adds a dedicated enrichment/tool layer:
 
 Because the current implementation environment does not guarantee live public-web access, the enrichment stage runs in a controlled fixture-backed mode by default using `data/ppp/research_fixtures.json`.
 
+The fixture pack now carries richer offline context, including verified, possible-match, and not-verified cases so the non-live path remains useful for demos and local review.
+
 The tool now supports three research modes:
 
 - `fixture`
@@ -53,6 +57,20 @@ This is deliberate:
 - it keeps the system ready for a later live-web connector without rewriting the pipeline
 
 The enrichment stage now executes the `candidate_public_profile_lookup` research adapter directly and normalizes the result into the existing enrichment schema before the final Claude generation call. In live or auto mode, that same contract can call a real public-web search provider with fixture fallback when needed.
+
+## Path defaults
+
+Repo-relative defaults are centralized in `app/ppp/paths.py`.
+
+Important locations can be overridden through environment variables instead of code edits:
+
+- `PPP_DATA_DIR`
+- `PPP_CANDIDATES_PATH`
+- `PPP_ROLE_SPEC_PATH`
+- `PPP_RESEARCH_FIXTURES_PATH`
+- `PPP_OUTPUT_PATH`
+- `PPP_INTERMEDIATE_DIR`
+- `PPP_LOCAL_STATE_FILE`
 
 ## QA layer
 

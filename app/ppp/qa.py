@@ -119,12 +119,16 @@ STOPWORDS = {
 LANE_TERMS = ("institutional", "wholesale", "wealth", "retail", "ifa", "platform", "distribution")
 SCOPE_TERMS = ("national", "anz", "global", "regional", "australia", "new zealand", "apac")
 SCREENING_ANGLE_TERMS = (
+    "first call should test",
     "first screening question",
     "key point to test",
     "test in conversation",
     "screening question",
     "screening conversation",
     "screening priority",
+    "screening call should focus first",
+    "quickest diligence question",
+    "pressure-test on a call",
 )
 GENERIC_INVITATION_TERMS = (
     "welcome a conversation",
@@ -303,6 +307,7 @@ def _check_candidate(
 
     findings.extend(_check_recruiter_usefulness(candidate, enrichment))
     findings.extend(_check_uncertainty_expression(candidate, enrichment))
+    findings.extend(_check_evidence_state_consistency(candidate, enrichment))
 
     if not _justification_mentions_evidence(candidate, input_candidate, enrichment):
         findings.append(
@@ -342,6 +347,7 @@ def _check_candidate(
         if (
             candidate.current_role.tenure_years is not None
             and enrichment.inferred_tenure_years is not None
+            and enrichment.identity_resolution.status != "not_verified"
             and abs(candidate.current_role.tenure_years - enrichment.inferred_tenure_years) > 0.25
         ):
             findings.append(
@@ -472,6 +478,8 @@ def _text_grounded_in_claims(text: str, claims: list[ResearchClaim], *, field_na
         return _all_sentences_supported(sentences, claims, min_overlap=1, min_similarity=0.48)
 
     if field_name == "mobility_signal":
+        if _mobility_has_uncertainty_structure(text):
+            return True
         return _all_sentences_supported(sentences, claims, min_overlap=1, min_similarity=0.42)
 
     if field_name == "outreach_hook":
@@ -555,6 +563,10 @@ def _sentence_count(text: str) -> int:
 
 def _error(candidate_id: str | None, check: str, message: str) -> QAFinding:
     return QAFinding(candidate_id=candidate_id, severity="error", check=check, message=message)
+
+
+def _warning(candidate_id: str | None, check: str, message: str) -> QAFinding:
+    return QAFinding(candidate_id=candidate_id, severity="warning", check=check, message=message)
 
 
 def _check_recruiter_usefulness(
@@ -689,6 +701,9 @@ def _check_uncertainty_expression(
         and "does not confirm" not in role_fit_text
         and "remains unclear" not in role_fit_text
         and "not verified" not in role_fit_text
+        and "remains to be tested" not in role_fit_text
+        and "should be checked" not in role_fit_text
+        and "to test" not in role_fit_text
     ):
         findings.append(
             _error(
@@ -698,6 +713,54 @@ def _check_uncertainty_expression(
             )
         )
 
+    return findings
+
+
+def _check_evidence_state_consistency(
+    candidate: CandidateBrief,
+    enrichment: CandidateEnrichmentResult | None,
+) -> list[QAFinding]:
+    if enrichment is None:
+        return []
+
+    findings: list[QAFinding] = []
+    match_state = enrichment.normalized_evidence().match_confidence_state
+    combined = " ".join(
+        [
+            candidate.career_narrative,
+            candidate.mobility_signal.rationale,
+            candidate.role_fit.justification,
+            candidate.outreach_hook,
+        ]
+    ).lower()
+
+    if match_state == "verified_match" and any(
+        phrase in combined
+        for phrase in (
+            "could not be verified",
+            "did not verify an exact-match profile",
+            "market map only",
+            "lower-priority mapping lead",
+        )
+    ):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "evidence_state_downgrade",
+                "Final wording downgrades a verified match into an unverified or map-only profile.",
+            )
+        )
+
+    if match_state == "no_reliable_match" and any(
+        phrase in combined for phrase in ("credible shortlist candidate", "screen-worthy likely match", "verified current")
+    ):
+        findings.append(
+            _error(
+                candidate.candidate_id,
+                "evidence_state_overclaim",
+                "Final wording upgrades an unreliable profile into a verified or shortlist-level match.",
+            )
+        )
     return findings
 
 
@@ -807,6 +870,8 @@ def _firm_aum_context_handles_uncertainty(text: str, enrichment: CandidateEnrich
         "unavailable",
         "based on firm type and sector context",
         "firm profile indicates",
+        "better recruiter read",
+        "useful takeaway",
     )
     return any(marker in lowered for marker in qualitative_markers)
 
@@ -826,9 +891,27 @@ def _contains_numeric_aum(text: str) -> bool:
 
 def _mobility_has_uncertainty_structure(text: str) -> bool:
     lowered = text.lower()
-    chronology_markers = ("public chronology", "approximately", "current-role tenure", "years in the current role")
-    uncertainty_markers = ("uncertain", "no direct public signal", "pending conversation", "requires follow-up")
-    follow_up_markers = ("pending conversation", "follow-up", "should be treated as uncertain")
+    chronology_markers = ("public chronology", "approximately", "current-role tenure", "years in the current role", "chronology")
+    uncertainty_markers = (
+        "uncertain",
+        "no direct public signal",
+        "no dependable public",
+        "not trusted",
+        "not evidenced",
+        "no explicit move signal",
+        "do not show clear move-readiness",
+        "move-readiness",
+        "mobility",
+    )
+    follow_up_markers = (
+        "pending conversation",
+        "follow-up",
+        "follow-up conversation",
+        "should be treated as uncertain",
+        "probe in conversation",
+        "in conversation",
+        "on a call",
+    )
     return (
         any(marker in lowered for marker in chronology_markers)
         and any(marker in lowered for marker in uncertainty_markers)
@@ -896,6 +979,9 @@ def _check_bundle_differentiation(
     enrichments: dict[str, CandidateEnrichmentResult],
 ) -> list[QAFinding]:
     findings: list[QAFinding] = []
+    findings.extend(_check_role_fit_score_distribution(output=output, enrichments=enrichments))
+    findings.extend(_check_structural_phrase_repetition(output=output))
+    findings.extend(_check_mobility_follow_up_repetition(output=output))
     for field_name in ("career_narrative", "role_fit.justification", "outreach_hook"):
         masked_seen: dict[str, tuple[str, str]] = {}
         for candidate in output.candidates:
@@ -944,6 +1030,114 @@ def _check_bundle_differentiation(
                     f"key_gaps are repeating as a low-value template across too many candidates: '{gap}'.",
                 )
             )
+    return findings
+
+
+def _check_structural_phrase_repetition(*, output: PPPOutput) -> list[QAFinding]:
+    findings: list[QAFinding] = []
+    monitored_phrases = (
+        "public evidence points to",
+        "the main point to test on a first call is",
+        "first call should test this directly",
+        "this looks better handled as",
+        "this should be treated as",
+    )
+    combined_texts = [
+        " ".join(
+            [
+                candidate.career_narrative.lower(),
+                candidate.role_fit.justification.lower(),
+                candidate.outreach_hook.lower(),
+            ]
+        )
+        for candidate in output.candidates
+    ]
+    for phrase in monitored_phrases:
+        occurrences = sum(1 for text in combined_texts if phrase in text)
+        if occurrences >= 3:
+            findings.append(
+                _warning(
+                    None,
+                    "bundle_phrase_repetition",
+                    f"Bundle still repeats a structural phrase too often: '{phrase}' appears in {occurrences} candidates.",
+                )
+            )
+    return findings
+
+
+def _check_mobility_follow_up_repetition(*, output: PPPOutput) -> list[QAFinding]:
+    findings: list[QAFinding] = []
+    follow_up_counts: dict[str, int] = {}
+    for candidate in output.candidates:
+        sentences = _split_sentences(candidate.mobility_signal.rationale)
+        if len(sentences) < 2:
+            continue
+        follow_up = re.sub(r"\s+", " ", sentences[-1].strip().lower())
+        follow_up_counts[follow_up] = follow_up_counts.get(follow_up, 0) + 1
+
+    for follow_up, count in follow_up_counts.items():
+        if count >= 3:
+            findings.append(
+                _warning(
+                    None,
+                    "mobility_follow_up_repetition",
+                    f"mobility rationale follow-up sentence is repeating too often across the bundle: '{follow_up}' appears {count} times.",
+                )
+            )
+    return findings
+
+
+def _check_role_fit_score_distribution(
+    *,
+    output: PPPOutput,
+    enrichments: dict[str, CandidateEnrichmentResult],
+) -> list[QAFinding]:
+    findings: list[QAFinding] = []
+    scores = [candidate.role_fit.score for candidate in output.candidates]
+    unique_scores = sorted(set(scores))
+    max_frequency = max(scores.count(score) for score in unique_scores)
+
+    if len(unique_scores) <= 2 and max_frequency >= 4:
+        findings.append(
+            _warning(
+                None,
+                "role_fit_score_compression",
+                f"role_fit scores are overly compressed for a 5-candidate PPP bundle: {scores}. Shortlist, adjacent, and mapping tiers should separate more clearly.",
+            )
+        )
+        return findings
+
+    if len(unique_scores) <= 3 and max_frequency >= 3:
+        findings.append(
+            _warning(
+                None,
+                "role_fit_score_compression_warning",
+                f"role_fit scores still look somewhat compressed: {scores}. Consider widening shortlist versus adjacent-screen separation.",
+            )
+        )
+
+    high_priority_candidates = [
+        candidate.candidate_id
+        for candidate in output.candidates
+        if candidate.role_fit.score >= 7
+    ]
+    strong_head_profiles = [
+        candidate_id
+        for candidate_id, enrichment in enrichments.items()
+        if enrichment.recruiter_signals.seniority_signal == "head_level"
+        and enrichment.recruiter_signals.scope_signal in {"national", "anz", "regional", "global"}
+        and enrichment.recruiter_signals.channel_orientation in {"wholesale", "institutional", "mixed"}
+        and enrichment.identity_resolution.status != "not_verified"
+    ]
+    if strong_head_profiles and not high_priority_candidates:
+        findings.append(
+            _warning(
+                None,
+                "role_fit_missing_high_priority_tier",
+                "Bundle includes head-level commercially relevant profiles, but none scored at shortlist level (7+).",
+            )
+        )
+
     return findings
 
 

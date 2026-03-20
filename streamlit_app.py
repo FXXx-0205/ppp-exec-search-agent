@@ -14,6 +14,8 @@ if str(REPO_ROOT) not in sys.path:
 from app.config import settings
 from app.llm.anthropic_client import ClaudeClient
 from app.ppp import PPPTaskError, run_ppp_pipeline
+from app.ppp.local_state import LocalAPIKeyState, clear_local_api_state, load_local_api_state, save_local_api_state
+from app.ppp.paths import DEFAULT_PATHS
 from app.ppp.role_spec import (
     dump_role_spec_json,
     load_role_spec_file,
@@ -24,13 +26,13 @@ from app.ppp.schema import PPPOutput, PPPRunResult
 
 APP_TITLE = "PPP Executive Search Agent"
 DEFAULT_MODEL = "claude-sonnet-4-5"
-DEFAULT_ROLE_SPEC = REPO_ROOT / "data/ppp/role_spec.json"
-UI_ROLE_SPEC_OVERRIDE = REPO_ROOT / "data/ppp/role_spec_ui.json"
-DEFAULT_FIXTURES = REPO_ROOT / "data/ppp/research_fixtures.json"
+DEFAULT_ROLE_SPEC = DEFAULT_PATHS.role_spec
+UI_ROLE_SPEC_OVERRIDE = DEFAULT_PATHS.role_spec_ui_override
+DEFAULT_FIXTURES = DEFAULT_PATHS.research_fixtures
 DEFAULT_RESEARCH_MODE = "live" if settings.tavily_api_key else "fixture"
-DEFAULT_UPLOADED_CSV = REPO_ROOT / "data/ppp/uploaded_candidates.csv"
-DEFAULT_OUTPUT_PATH = REPO_ROOT / "data/ppp/output.json"
-DEFAULT_INTERMEDIATE_DIR = REPO_ROOT / "data/ppp/intermediate"
+DEFAULT_UPLOADED_CSV = DEFAULT_PATHS.uploaded_candidates_csv
+DEFAULT_OUTPUT_PATH = DEFAULT_PATHS.output_json
+DEFAULT_INTERMEDIATE_DIR = DEFAULT_PATHS.intermediate_dir
 RESEARCH_MODE_OPTIONS = {
     "Fixture (Local test data)": "fixture",
     "Live API (Public web research)": "live",
@@ -53,6 +55,15 @@ def inject_tavily_api_key(api_key: str) -> None:
         os.environ["TAVILY_API_KEY"] = normalized
     else:
         os.environ.pop("TAVILY_API_KEY", None)
+
+
+def _save_local_keys(anthropic_api_key: str, tavily_api_key: str) -> Path:
+    return save_local_api_state(
+        LocalAPIKeyState(
+            anthropic_api_key=anthropic_api_key.strip(),
+            tavily_api_key=tavily_api_key.strip(),
+        )
+    )
 
 
 def save_uploaded_csv(uploaded_file, target_dir: Path) -> Path:
@@ -210,6 +221,8 @@ def render_results(output: PPPOutput, output_json: str) -> None:
         file_name="output.json",
         mime="application/json",
         use_container_width=True,
+        key="download_output_json",
+        on_click="ignore",
     )
 
 
@@ -234,42 +247,81 @@ def render_run_report(result: PPPRunResult, run_report_json: str | None) -> None
             file_name="run_report.json",
             mime="application/json",
             use_container_width=True,
+            key="download_run_report_json",
+            on_click="ignore",
         )
 
 
 st.set_page_config(page_title=APP_TITLE, page_icon="🔍", layout="wide")
 
+cached_keys = load_local_api_state()
 st.session_state.setdefault("ppp_output", None)
 st.session_state.setdefault("ppp_output_json", None)
 st.session_state.setdefault("ppp_run_result", None)
 st.session_state.setdefault("ppp_run_report_json", None)
 st.session_state.setdefault("ppp_role_spec_text", dump_role_spec_json(load_role_spec_file(DEFAULT_ROLE_SPEC)))
 st.session_state.setdefault("ppp_role_spec_source_text", "")
+st.session_state.setdefault("ppp_anthropic_api_key", cached_keys.anthropic_api_key)
+st.session_state.setdefault("ppp_tavily_api_key", cached_keys.tavily_api_key)
+st.session_state.setdefault(
+    "ppp_remember_api_keys",
+    bool(cached_keys.anthropic_api_key or cached_keys.tavily_api_key),
+)
 
 with st.sidebar:
     st.title("🔍 PPP Executive Search Agent")
-    api_key = st.text_input("Anthropic API Key", type="password", help="Used only for this Streamlit session.")
+    api_key = st.text_input(
+        "Anthropic API Key",
+        type="password",
+        key="ppp_anthropic_api_key",
+        help="Used for the current run. You can also cache it locally on this machine.",
+    )
     tavily_api_key = st.text_input(
         "TAVILY_API_KEY",
         type="password",
-        help="Required only when using Live API mode.",
+        key="ppp_tavily_api_key",
+        help="Required only when using Live API mode. Can be cached locally on this machine.",
     )
+    remember_keys = st.checkbox(
+        "Remember keys locally on this machine",
+        key="ppp_remember_api_keys",
+        help=f"Saved only to {DEFAULT_PATHS.display(DEFAULT_PATHS.local_state_file)} and ignored by git.",
+    )
+    save_keys_col, clear_keys_col = st.columns(2)
+    with save_keys_col:
+        save_keys_clicked = st.button("Save Keys", use_container_width=True)
+    with clear_keys_col:
+        clear_keys_clicked = st.button("Clear Saved", use_container_width=True)
     research_mode_label = st.radio(
         "Research Mode",
         options=list(RESEARCH_MODE_OPTIONS.keys()),
         index=0 if DEFAULT_RESEARCH_MODE == "fixture" else 1,
     )
     selected_research_mode = RESEARCH_MODE_OPTIONS[research_mode_label]
+    if save_keys_clicked:
+        saved_path = _save_local_keys(api_key, tavily_api_key)
+        st.success(f"Saved locally: {DEFAULT_PATHS.display(saved_path)}")
+    if clear_keys_clicked:
+        clear_local_api_state()
+        st.session_state["ppp_anthropic_api_key"] = ""
+        st.session_state["ppp_tavily_api_key"] = ""
+        st.session_state["ppp_remember_api_keys"] = False
+        api_key = ""
+        tavily_api_key = ""
+        remember_keys = False
+        inject_api_key("")
+        inject_tavily_api_key("")
+        st.success("Cleared locally saved API keys.")
     st.caption("Live mode uses public web research and API credits. Fixture mode uses local mock research for fast testing.")
     inject_api_key(api_key)
     inject_tavily_api_key(tavily_api_key)
     st.caption("Upload a five-row candidate CSV, run the existing PPP pipeline, and review client-ready briefings.")
-    st.caption(f"Results overwrite the latest saved files under {DEFAULT_OUTPUT_PATH.parent}.")
+    st.caption(f"Results overwrite the latest saved files under `{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH.parent)}`.")
 
 st.markdown("<h1 style='text-align: center;'>Candidate Briefing Generator</h1>", unsafe_allow_html=True)
 st.markdown("## Role Specification")
 st.caption(
-    "The app loads the default role specification from `data/ppp/role_spec.json`. "
+    f"The app loads the default role specification from `{DEFAULT_PATHS.display(DEFAULT_ROLE_SPEC)}`. "
     "You can paste a new mandate below to parse it, or edit the structured JSON directly before uploading candidates."
 )
 role_spec_text_col, role_spec_json_col = st.columns(2)
@@ -337,6 +389,8 @@ if generate_clicked:
         with st.spinner(spinner_text):
             temp_csv_path = save_uploaded_csv(uploaded_csv, DEFAULT_UPLOADED_CSV.parent)
             role_spec_path = persist_role_spec(role_spec)
+            if remember_keys:
+                _save_local_keys(api_key, tavily_api_key)
             try:
                 result = run_ppp_pipeline(
                     input_path=str(temp_csv_path),
@@ -366,9 +420,9 @@ if generate_clicked:
                         f"Generated {result.successful_candidate_count} candidate briefings; "
                         f"{result.failed_candidate_count} candidate(s) need review."
                     )
-                st.caption(f"Saved output: {DEFAULT_OUTPUT_PATH}")
-                st.caption(f"Saved QA / run artifacts: {DEFAULT_INTERMEDIATE_DIR}")
-                st.caption(f"Saved role spec: {role_spec_path}")
+                st.caption(f"Saved output: `{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH)}`")
+                st.caption(f"Saved QA / run artifacts: `{DEFAULT_PATHS.display(DEFAULT_INTERMEDIATE_DIR)}`")
+                st.caption(f"Saved role spec: `{DEFAULT_PATHS.display(role_spec_path)}`")
 
 if st.session_state["ppp_output"] is not None and st.session_state["ppp_output_json"] is not None:
     if st.session_state["ppp_run_result"] is not None:

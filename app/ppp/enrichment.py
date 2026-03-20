@@ -9,11 +9,13 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, Field, field_validator
 
 from app.ppp.models import CandidateCSVRow
+from app.ppp.paths import DEFAULT_PATHS
 from app.ppp.research import PublicResearchClient, ResearchClientError
 
 VerificationStatus = Literal["verified", "strongly_inferred", "uncertain"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 IdentityResolutionStatus = Literal["verified_match", "possible_match", "not_verified"]
+EvidenceMatchState = Literal["verified_match", "likely_match", "partial_match", "no_reliable_match"]
 ChannelOrientation = Literal["institutional", "wholesale", "wealth", "retail", "mixed", "unclear"]
 MandateSimilarity = Literal["direct_match", "adjacent_match", "step_up_candidate", "unclear_fit"]
 ScopeSignal = Literal["national", "anz", "global", "regional", "unclear"]
@@ -144,6 +146,40 @@ class RecruiterSignals(BaseModel):
         return normalized
 
 
+class NormalizedEvidence(BaseModel):
+    match_confidence_state: EvidenceMatchState
+    strongest_title_employer_signal: str
+    public_profile_confidence_notes: list[str] = Field(default_factory=list)
+    firm_context_confidence_notes: list[str] = Field(default_factory=list)
+    role_relevant_distribution_signals: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+    verified_employer: str
+    verified_title: str
+    tenure_years: float
+
+    @field_validator(
+        "strongest_title_employer_signal",
+        "verified_employer",
+        "verified_title",
+    )
+    @classmethod
+    def _require_non_empty_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Field cannot be empty.")
+        return normalized
+
+    @field_validator(
+        "public_profile_confidence_notes",
+        "firm_context_confidence_notes",
+        "role_relevant_distribution_signals",
+        "uncertainty_notes",
+    )
+    @classmethod
+    def _strip_notes(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item and item.strip()]
+
+
 class CandidateEnrichmentResult(BaseModel):
     tool_name: str = "candidate_public_profile_lookup"
     tool_mode: str = "fixture_backed"
@@ -165,6 +201,21 @@ class CandidateEnrichmentResult(BaseModel):
             if claim.category == "tenure" and claim.numeric_value is not None:
                 return claim.numeric_value
         return None
+
+    @property
+    def output_tenure_years(self) -> float:
+        # Keep schema-compliant numeric output, but do not present false precision when
+        # identity confidence is weak. Verified matches can keep the underlying estimate;
+        # possible matches are rounded conservatively; unverified matches fall back to 0.0.
+        tenure = self.inferred_tenure_years
+        if tenure is None:
+            return 0.0
+        safe_tenure = max(0.0, tenure)
+        if self.identity_resolution.status == "not_verified":
+            return 0.0
+        if self.identity_resolution.status == "possible_match":
+            return round(safe_tenure * 2) / 2
+        return round(safe_tenure, 1)
 
     @property
     def firm_aum_context(self) -> str:
@@ -231,6 +282,7 @@ class CandidateEnrichmentResult(BaseModel):
             ]
 
         return {
+            "normalized_evidence": self.normalized_evidence().model_dump(mode="json"),
             "identity_resolution": self.identity_resolution.model_dump(mode="json"),
             "current_role": {
                 "title": self.current_title,
@@ -238,7 +290,7 @@ class CandidateEnrichmentResult(BaseModel):
                 "supported_by_claim_ids": [claim.claim_id for claim in current_role_claims],
             },
             "tenure_years": {
-                "value": self.inferred_tenure_years,
+                "value": self.output_tenure_years,
                 "confidence": tenure_claim.confidence if tenure_claim is not None else "low",
                 "verification_status": tenure_claim.verification_status if tenure_claim is not None else "uncertain",
                 "range": tenure_range,
@@ -318,12 +370,39 @@ class CandidateEnrichmentResult(BaseModel):
             "allowed_facts": self.allowed_facts(),
         }
 
+    def normalized_evidence(self) -> NormalizedEvidence:
+        strongest_role_claim = self.best_claim("current_role")
+        firm_claim = self.best_claim("firm_context")
+        role_signals = [
+            claim.statement
+            for claim in self.claims
+            if claim.category in {"channel_experience", "experience", "scope", "remit"}
+        ][:4]
+        public_notes = [self.identity_resolution.rationale, *self.verification.confidence_notes[:2]]
+        firm_notes = [firm_claim.statement] if firm_claim is not None else [self.firm_aum_context]
+        uncertainty_notes = [*self.verification.uncertain_fields[:3], *self.verification.missing_fields[:2]]
+        return NormalizedEvidence(
+            match_confidence_state=_normalize_match_confidence_state(self),
+            strongest_title_employer_signal=(
+                strongest_role_claim.statement
+                if strongest_role_claim is not None
+                else f"{self.current_title} at {self.current_employer}"
+            ),
+            public_profile_confidence_notes=public_notes,
+            firm_context_confidence_notes=firm_notes,
+            role_relevant_distribution_signals=role_signals,
+            uncertainty_notes=uncertainty_notes,
+            verified_employer=self.current_employer,
+            verified_title=self.current_title,
+            tenure_years=self.output_tenure_years,
+        )
+
 
 class CandidatePublicProfileLookupTool:
     def __init__(
         self,
         *,
-        fixture_path: str = "data/ppp/research_fixtures.json",
+        fixture_path: str = str(DEFAULT_PATHS.research_fixtures),
         mode: str = "fixture",
         research_client: PublicResearchClient | None = None,
     ) -> None:
@@ -353,7 +432,7 @@ class CandidatePublicProfileLookupTool:
             return self._build_result(tool_input, merged_fixture, tool_mode="fixture_fallback")
         raise ResearchClientError(f"Unsupported research mode: {self.mode}")
 
-    def save_intermediate(self, result: CandidateEnrichmentResult, *, output_dir: str = "data/ppp/intermediate") -> Path:
+    def save_intermediate(self, result: CandidateEnrichmentResult, *, output_dir: str = str(DEFAULT_PATHS.intermediate_dir)) -> Path:
         target_dir = Path(output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{result.candidate_id}_enriched.json"
@@ -468,6 +547,8 @@ class CandidatePublicProfileLookupTool:
                     supports_output_fields=["career_narrative", "current_role", "mobility_signal", "role_fit", "outreach_hook"],
                 )
             )
+
+        claims.extend(self._build_fixture_claims(tool_input=tool_input, fixture=fixture, default_source_labels=source_labels))
 
         verified_snippets = self._list_value(
             fixture,
@@ -621,6 +702,74 @@ class CandidatePublicProfileLookupTool:
             )
 
         return claims
+
+    def _build_fixture_claims(
+        self,
+        *,
+        tool_input: CandidatePublicProfileLookupInput,
+        fixture: dict[str, Any],
+        default_source_labels: list[str],
+    ) -> list[ResearchClaim]:
+        raw_claims = fixture.get("claims")
+        if not isinstance(raw_claims, list):
+            return []
+
+        parsed_claims: list[ResearchClaim] = []
+        for idx, item in enumerate(raw_claims, start=1):
+            if not isinstance(item, dict):
+                continue
+            statement = item.get("statement")
+            category = item.get("category")
+            if not isinstance(statement, str) or not statement.strip():
+                continue
+            if not isinstance(category, str) or not category.strip():
+                continue
+
+            verification_status = str(item.get("verification_status", "strongly_inferred")).strip().lower()
+            if verification_status not in {"verified", "strongly_inferred", "uncertain"}:
+                verification_status = "strongly_inferred"
+
+            confidence = str(item.get("confidence", "medium")).strip().lower()
+            if confidence not in {"high", "medium", "low"}:
+                confidence = "medium"
+
+            source_labels = self._list_value(fixture=item, key="source_labels", fallback=default_source_labels)
+            supports_output_fields = self._list_value(
+                fixture=item,
+                key="supports_output_fields",
+                fallback=self._default_supports_for_fixture_claim(str(category)),
+            )
+            numeric_value = item.get("numeric_value")
+            if not isinstance(numeric_value, (int, float)):
+                numeric_value = None
+
+            parsed_claims.append(
+                ResearchClaim(
+                    claim_id=f"{tool_input.candidate_id}_fixture_claim_{idx}",
+                    category=category.strip(),
+                    statement=statement.strip(),
+                    verification_status=cast(VerificationStatus, verification_status),
+                    confidence=cast(ConfidenceLevel, confidence),
+                    source_labels=source_labels,
+                    supports_output_fields=supports_output_fields,
+                    numeric_value=float(numeric_value) if isinstance(numeric_value, (int, float)) else None,
+                )
+            )
+        return parsed_claims
+
+    def _default_supports_for_fixture_claim(self, category: str) -> list[str]:
+        lowered = category.strip().lower()
+        mapping = {
+            "current_role": ["career_narrative", "role_fit", "current_role", "outreach_hook"],
+            "channel_experience": ["career_narrative", "experience_tags", "role_fit", "outreach_hook"],
+            "experience": ["career_narrative", "experience_tags", "role_fit", "outreach_hook"],
+            "firm_context": ["firm_aum_context", "career_narrative", "role_fit"],
+            "mobility": ["mobility_signal", "career_narrative", "outreach_hook"],
+            "scope": ["career_narrative", "role_fit", "experience_tags"],
+            "remit": ["career_narrative", "role_fit", "outreach_hook"],
+            "chronology": ["career_narrative", "mobility_signal", "current_role"],
+        }
+        return mapping.get(lowered, ["career_narrative", "role_fit"])
 
     def _resolve_identity_resolution(
         self,
@@ -782,6 +931,10 @@ def validate_enrichment_payload(payload: Any) -> CandidateEnrichmentResult:
     return CandidateEnrichmentResult.model_validate(payload)
 
 
+def validate_normalized_evidence_payload(payload: Any) -> NormalizedEvidence:
+    return NormalizedEvidence.model_validate(payload)
+
+
 def derive_recruiter_signals(
     *,
     tool_input: CandidatePublicProfileLookupInput,
@@ -844,6 +997,17 @@ def _firm_context_status(statement: str) -> VerificationStatus:
     if any(term in lowered for term in QUALIFIER_TERMS):
         return "uncertain"
     return "verified"
+
+
+def _normalize_match_confidence_state(enrichment: CandidateEnrichmentResult) -> EvidenceMatchState:
+    status = enrichment.identity_resolution.status
+    if status == "verified_match":
+        return "verified_match"
+    if status == "possible_match":
+        if enrichment.recruiter_signals.evidence_strength in {"strong", "moderate"}:
+            return "likely_match"
+        return "partial_match"
+    return "no_reliable_match"
 
 
 def _contains_numeric_aum(text: str) -> bool:
@@ -1162,20 +1326,56 @@ def _derive_scope_signal(
     relevant_claims = [
         claim.statement.lower()
         for claim in claims
-        if claim.category in {"current_role", "channel_experience", "experience", "firm_context"}
+        if claim.category in {"current_role", "channel_experience", "experience", "scope", "remit"}
     ]
     text = " ".join([tool_input.current_title.lower(), *relevant_claims])
-    if any(term in text for term in ("global ", "global-", "worldwide", "international")):
+    if _matches_scope_pattern(
+        text,
+        (
+            r"\bglobal\s+(?:head|lead|distribution|sales|coverage|remit|scope|role|team|market|client|platform|institutional|wholesale|wealth)\b",
+            r"\bworldwide\b",
+            r"\binternational\s+(?:coverage|distribution|sales|remit|scope|role|client|platform)\b",
+        ),
+    ):
         return "global"
-    if any(term in text for term in ("anz", "australia and new zealand", "australia & new zealand")):
+    if _matches_scope_pattern(
+        text,
+        (
+            r"\banz\b",
+            r"\baustralia and new zealand\b",
+            r"\baustralia\s*&\s*new zealand\b",
+        ),
+    ):
         return "anz"
-    if any(term in text for term in ("apac", "asia pacific", "asia-pacific", "emea", "regional")):
+    if _matches_scope_pattern(
+        text,
+        (
+            r"\bapac\b",
+            r"\basia pacific\b",
+            r"\basia-pacific\b",
+            r"\bemea\b",
+            r"\bregional\s+(?:distribution|sales|coverage|remit|scope|role|leadership)\b",
+        ),
+    ):
         return "regional"
-    if any(term in text for term in ("national", " in australia", " across australia", " australia-based", " australia based")):
+    if _matches_scope_pattern(
+        text,
+        (
+            r"\bnational\s+(?:distribution|sales|coverage|remit|scope|role|leadership)\b",
+            r"\bin australia\b",
+            r"\bacross australia\b",
+            r"\baustralia-based\b",
+            r"\baustralia based\b",
+        ),
+    ):
         return "national"
     if any(term in tool_input.current_title.lower() for term in ("head of distribution", "distribution director", "director distribution", "head of sales", "national bdm")):
         return "national"
     return "unclear"
+
+
+def _matches_scope_pattern(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(re.search(pattern, text) for pattern in patterns)
 
 
 def _is_non_distribution_title(title: str) -> bool:
