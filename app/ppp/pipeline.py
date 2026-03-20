@@ -1090,7 +1090,7 @@ def _apply_listwise_ranking(
             tier_group.sort(key=lambda item: (-item[1], item[0].candidate_id))
         band = _tier_score_band(tier)
         assigned_scores = _band_scores_for_group(group_size=len(tier_group), band=band)
-        for assigned_score, (candidate, _objective, _enrichment) in zip(assigned_scores, tier_group):
+        for assigned_score, (candidate, _objective, _enrichment) in zip(assigned_scores, tier_group, strict=True):
             candidate.role_fit = candidate.role_fit.model_copy(update={"score": assigned_score})
             ranked_candidates.append(candidate)
 
