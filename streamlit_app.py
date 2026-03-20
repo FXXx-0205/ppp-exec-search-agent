@@ -29,13 +29,13 @@ DEFAULT_MODEL = "claude-sonnet-4-5"
 DEFAULT_ROLE_SPEC = DEFAULT_PATHS.role_spec
 UI_ROLE_SPEC_OVERRIDE = DEFAULT_PATHS.role_spec_ui_override
 DEFAULT_FIXTURES = DEFAULT_PATHS.research_fixtures
-DEFAULT_RESEARCH_MODE = "live" if settings.tavily_api_key else "fixture"
+DEFAULT_RESEARCH_MODE = "fixture"
 DEFAULT_UPLOADED_CSV = DEFAULT_PATHS.uploaded_candidates_csv
 DEFAULT_OUTPUT_PATH = DEFAULT_PATHS.output_json
 DEFAULT_INTERMEDIATE_DIR = DEFAULT_PATHS.intermediate_dir
 RESEARCH_MODE_OPTIONS = {
-    "Fixture (Local test data)": "fixture",
-    "Live API (Public web research)": "live",
+    "Fixture (recommended for submission/demo)": "fixture",
+    "Live API (optional, requires API keys)": "live",
 }
 
 
@@ -77,6 +77,20 @@ def persist_role_spec(role_spec: dict) -> Path:
     UI_ROLE_SPEC_OVERRIDE.parent.mkdir(parents=True, exist_ok=True)
     UI_ROLE_SPEC_OVERRIDE.write_text(dump_role_spec_json(role_spec), encoding="utf-8")
     return UI_ROLE_SPEC_OVERRIDE
+
+
+def _read_artifact_text(path_str: str | None) -> str | None:
+    if not path_str:
+        return None
+    path = Path(path_str)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def _load_failure_artifact(path_str: str | None) -> dict | None:
@@ -134,56 +148,54 @@ def _recommended_next_check(failure, artifact: dict | None) -> str:
 def render_failure_card(failure) -> None:
     artifact = _load_failure_artifact(failure.artifact_path)
     title = _friendly_failure_title(failure.stage)
-    subtitle = f"{failure.full_name} - {title}"
-    with st.expander(subtitle, expanded=False):
-        st.warning(title)
-        st.markdown("**Why it was held back**")
-        for reason in _friendly_failure_reasons(failure.error_message):
-            st.write(f"- {reason}")
+    st.markdown(f"**{failure.full_name}**")
+    st.caption(title)
+    st.markdown("**Why it was held back**")
+    for reason in _friendly_failure_reasons(failure.error_message):
+        st.write(f"- {reason}")
 
-        next_check = _recommended_next_check(failure, artifact)
-        st.markdown("**Recommended next check**")
-        st.write(next_check)
+    next_check = _recommended_next_check(failure, artifact)
+    st.markdown("**Recommended next check**")
+    st.write(next_check)
 
-        if artifact is not None:
-            candidate_brief = artifact.get("candidate_brief") or {}
-            if candidate_brief:
-                st.markdown("**Draft wording that was held back**")
-                if candidate_brief.get("career_narrative"):
-                    st.caption(f"Career Narrative: {candidate_brief['career_narrative']}")
-                mobility = candidate_brief.get("mobility_signal") or {}
-                if mobility.get("rationale"):
-                    st.caption(f"Mobility Note: {mobility['rationale']}")
+    if artifact is not None:
+        candidate_brief = artifact.get("candidate_brief") or {}
+        if candidate_brief:
+            st.markdown("**Draft wording that was held back**")
+            if candidate_brief.get("career_narrative"):
+                st.caption(f"Career Narrative: {candidate_brief['career_narrative']}")
+            mobility = candidate_brief.get("mobility_signal") or {}
+            if mobility.get("rationale"):
+                st.caption(f"Mobility Note: {mobility['rationale']}")
 
-        if failure.artifact_path:
-            st.caption(f"Review artifact: {failure.artifact_path}")
+    if failure.artifact_path:
+        st.caption(f"Review artifact: {failure.artifact_path}")
+    st.divider()
 
 
 def render_candidate_card(candidate) -> None:
-    tenure_unknown = candidate.current_role.tenure_years == -1
-    expander_label = (
-        f"{candidate.full_name} - {candidate.current_role.title} @ {candidate.current_role.employer}"
+    label = (
+        f"{candidate.full_name} | {candidate.current_role.title} @ {candidate.current_role.employer} | "
+        f"Role Fit {candidate.role_fit.score}/10 | Mobility {candidate.mobility_signal.score}/5"
     )
-
-    with st.expander(expander_label, expanded=False):
-        score_col, mobility_col = st.columns(2)
-        score_col.metric("Role Fit Score", f"{candidate.role_fit.score} / 10")
-        mobility_col.metric("Mobility Score", f"{candidate.mobility_signal.score} / 5")
-
-        st.success(candidate.outreach_hook)
+    with st.expander(label, expanded=False):
+        st.markdown("**Outreach Hook**")
+        st.write(candidate.outreach_hook)
 
         st.markdown("**Career Narrative**")
         st.write(candidate.career_narrative)
 
+        st.markdown("**Experience Tags**")
+        st.write(", ".join(candidate.experience_tags))
+
+        st.markdown("**Firm Context**")
+        st.write(candidate.firm_aum_context)
+
+        st.markdown("**Mobility Rationale**")
+        st.write(candidate.mobility_signal.rationale)
+
         st.markdown("**Role Fit Justification**")
         st.write(candidate.role_fit.justification)
-
-        tags_text = " ".join(f"`{tag}`" for tag in candidate.experience_tags)
-        st.caption(f"Experience Tags: {tags_text}")
-        st.caption(f"Firm AUM Context: {candidate.firm_aum_context}")
-
-        if tenure_unknown:
-            st.caption(f"Tenure Note: {candidate.mobility_signal.rationale}")
 
 
 def _candidate_bucket(candidate) -> str:
@@ -195,8 +207,14 @@ def _candidate_bucket(candidate) -> str:
     return "verify_first"
 
 
-def render_results(output: PPPOutput, output_json: str) -> None:
-    st.markdown("## Candidate Briefings")
+def render_output_preview(output: PPPOutput) -> None:
+    st.markdown("## Review the generated briefings")
+    st.caption("Open each candidate to review the note before downloading the final bundle.")
+    for candidate in output.candidates:
+        render_candidate_card(candidate)
+
+
+def render_candidate_diagnostics(output: PPPOutput) -> None:
     grouped = {
         "priority": [candidate for candidate in output.candidates if _candidate_bucket(candidate) == "priority"],
         "possible": [candidate for candidate in output.candidates if _candidate_bucket(candidate) == "possible"],
@@ -213,20 +231,35 @@ def render_results(output: PPPOutput, output_json: str) -> None:
         st.markdown(f"### {heading}")
         st.caption(caption)
         for candidate in candidates:
-            render_candidate_card(candidate)
-
-    st.download_button(
-        label="Download output.json",
-        data=output_json,
-        file_name="output.json",
-        mime="application/json",
-        use_container_width=True,
-        key="download_output_json",
-        on_click="ignore",
-    )
+            st.write(f"- {candidate.full_name} — {candidate.current_role.title} @ {candidate.current_role.employer}")
 
 
-def render_run_report(result: PPPRunResult, run_report_json: str | None) -> None:
+def _qa_summary(qa_report_json: str | None) -> tuple[str, str]:
+    if not qa_report_json:
+        return ("QA status unavailable", "No QA report was loaded into the UI.")
+    try:
+        payload = json.loads(qa_report_json)
+    except json.JSONDecodeError:
+        return ("QA report unreadable", "The QA report file could not be parsed.")
+    passed = bool(payload.get("passed"))
+    findings = payload.get("findings") or []
+    if passed:
+        return ("QA passed", "Bundle-level QA passed for the current output.")
+    return ("QA needs review", f"Bundle-level QA reported {len(findings)} finding(s).")
+
+
+def render_result_summary(result: PPPRunResult, qa_report_json: str | None) -> None:
+    qa_status, qa_caption = _qa_summary(qa_report_json)
+    st.markdown("## Result summary")
+    summary_col_one, summary_col_two, summary_col_three = st.columns(3)
+    summary_col_one.metric("Candidate briefings", str(result.successful_candidate_count))
+    summary_col_two.metric("Delivery status", result.delivery_status.replace("_", " ").title())
+    summary_col_three.metric("QA status", qa_status)
+    st.caption(qa_caption)
+    st.caption(f"Output saved to `{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH)}`")
+    st.caption(f"QA and run artifacts saved to `{DEFAULT_PATHS.display(DEFAULT_INTERMEDIATE_DIR)}`")
+
+def render_run_report(result: PPPRunResult, run_report_json: str | None, qa_report_json: str | None) -> None:
     if result.delivery_status == "partial_success":
         st.warning(
             f"Generated {result.successful_candidate_count} candidate briefings; "
@@ -240,16 +273,29 @@ def render_run_report(result: PPPRunResult, run_report_json: str | None) -> None
         st.caption("These profiles completed processing but were not promoted into the final briefing set because the draft remained too uncertain or not client-ready.")
         for failure in result.failed_candidates:
             render_failure_card(failure)
+    download_col_one, download_col_two = st.columns(2)
     if run_report_json is not None:
-        st.download_button(
-            label="Download run_report.json",
-            data=run_report_json,
-            file_name="run_report.json",
-            mime="application/json",
-            use_container_width=True,
-            key="download_run_report_json",
-            on_click="ignore",
-        )
+        with download_col_one:
+            st.download_button(
+                label="Download run_report.json",
+                data=run_report_json,
+                file_name="run_report.json",
+                mime="application/json",
+                use_container_width=True,
+                key="download_run_report_json",
+                on_click="ignore",
+            )
+    if qa_report_json is not None:
+        with download_col_two:
+            st.download_button(
+                label="Download qa_report.json",
+                data=qa_report_json,
+                file_name="qa_report.json",
+                mime="application/json",
+                use_container_width=True,
+                key="download_qa_report_json",
+                on_click="ignore",
+            )
 
 
 st.set_page_config(page_title=APP_TITLE, page_icon="🔍", layout="wide")
@@ -259,6 +305,7 @@ st.session_state.setdefault("ppp_output", None)
 st.session_state.setdefault("ppp_output_json", None)
 st.session_state.setdefault("ppp_run_result", None)
 st.session_state.setdefault("ppp_run_report_json", None)
+st.session_state.setdefault("ppp_qa_report_json", None)
 st.session_state.setdefault("ppp_role_spec_text", dump_role_spec_json(load_role_spec_file(DEFAULT_ROLE_SPEC)))
 st.session_state.setdefault("ppp_role_spec_source_text", "")
 st.session_state.setdefault("ppp_anthropic_api_key", cached_keys.anthropic_api_key)
@@ -268,20 +315,62 @@ st.session_state.setdefault(
     bool(cached_keys.anthropic_api_key or cached_keys.tavily_api_key),
 )
 
-with st.sidebar:
-    st.title("🔍 PPP Executive Search Agent")
-    api_key = st.text_input(
-        "Anthropic API Key",
-        type="password",
-        key="ppp_anthropic_api_key",
-        help="Used for the current run. You can also cache it locally on this machine.",
-    )
-    tavily_api_key = st.text_input(
-        "TAVILY_API_KEY",
-        type="password",
-        key="ppp_tavily_api_key",
-        help="Required only when using Live API mode. Can be cached locally on this machine.",
-    )
+st.title("PPP Candidate Briefing Generator")
+st.write("Upload a five-row PPP candidate CSV and generate the final `output.json` briefing bundle.")
+st.caption(
+    "For submission or demo use, fixture mode is recommended. Live mode is an optional public-web enrichment path if you want to test external research."
+)
+st.caption("1. Choose fixture mode for submission/demo. 2. Upload the CSV. 3. Generate and review the output bundle.")
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: #ffffff;
+    }
+    header[data-testid="stHeader"] {
+        background: transparent;
+        border-bottom: none;
+    }
+    div[data-testid="stToolbar"] {
+        right: 0.75rem;
+    }
+    .block-container {
+        padding-top: 1.5rem;
+    }
+    div[data-testid="stVerticalBlock"] div[data-testid="stExpander"] {
+        border: 1px solid #e2d4cd;
+        border-radius: 12px;
+        background-color: rgba(255, 255, 255, 0.72);
+    }
+    div[data-testid="stMetric"] {
+        background-color: rgba(255, 255, 255, 0.78);
+        border: 1px solid #e4d7cf;
+        border-radius: 12px;
+        padding: 0.4rem 0.75rem;
+    }
+    div.stButton > button[kind="secondary"] {
+        background-color: #ead9d2;
+        color: #5a3b32;
+        border: 1px solid #d3bbb1;
+        border-radius: 10px;
+    }
+    div.stButton > button[kind="secondary"]:hover {
+        background-color: #e0ccc4;
+        border-color: #c8aa9d;
+        color: #4d3028;
+    }
+    div.stDownloadButton > button {
+        border-radius: 10px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+api_key = st.session_state["ppp_anthropic_api_key"]
+tavily_api_key = st.session_state["ppp_tavily_api_key"]
+
+with st.expander("Advanced: local key storage", expanded=False):
     remember_keys = st.checkbox(
         "Remember keys locally on this machine",
         key="ppp_remember_api_keys",
@@ -292,12 +381,6 @@ with st.sidebar:
         save_keys_clicked = st.button("Save Keys", use_container_width=True)
     with clear_keys_col:
         clear_keys_clicked = st.button("Clear Saved", use_container_width=True)
-    research_mode_label = st.radio(
-        "Research Mode",
-        options=list(RESEARCH_MODE_OPTIONS.keys()),
-        index=0 if DEFAULT_RESEARCH_MODE == "fixture" else 1,
-    )
-    selected_research_mode = RESEARCH_MODE_OPTIONS[research_mode_label]
     if save_keys_clicked:
         saved_path = _save_local_keys(api_key, tavily_api_key)
         st.success(f"Saved locally: {DEFAULT_PATHS.display(saved_path)}")
@@ -312,70 +395,101 @@ with st.sidebar:
         inject_api_key("")
         inject_tavily_api_key("")
         st.success("Cleared locally saved API keys.")
-    st.caption("Live mode uses public web research and API credits. Fixture mode uses local research fixtures and is the safest submission/demo path.")
-    inject_api_key(api_key)
-    inject_tavily_api_key(tavily_api_key)
-    st.caption("Upload a five-row candidate CSV, run the existing PPP pipeline, and review client-ready briefings.")
-    st.caption(f"Results overwrite the latest saved files under `{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH.parent)}`.")
 
-st.markdown("<h1 style='text-align: center;'>Candidate Briefing Generator</h1>", unsafe_allow_html=True)
-st.markdown("## Role Specification")
-st.caption(
-    f"The app loads the default role specification from `{DEFAULT_PATHS.display(DEFAULT_ROLE_SPEC)}`. "
-    "You can paste a new mandate below to parse it, or edit the structured JSON directly before uploading candidates."
-)
-role_spec_text_col, role_spec_json_col = st.columns(2)
-with role_spec_text_col:
-    st.text_area(
-        "Role specification text (optional)",
-        key="ppp_role_spec_source_text",
-        height=260,
-        placeholder="Paste a hiring brief or role description here, then click Parse Role Spec.",
-    )
-with role_spec_json_col:
-    st.text_area(
-        "Structured role specification JSON",
-        key="ppp_role_spec_text",
-        height=260,
+parse_role_spec_clicked = False
+reset_role_spec_clicked = False
+
+has_output = st.session_state["ppp_output"] is not None and st.session_state["ppp_output_json"] is not None
+
+if has_output and st.session_state["ppp_run_result"] is not None:
+    render_result_summary(
+        result=st.session_state["ppp_run_result"],
+        qa_report_json=st.session_state["ppp_qa_report_json"],
     )
 
-role_spec_action_col, role_spec_reset_col = st.columns(2)
-with role_spec_action_col:
-    parse_role_spec_clicked = st.button("Parse Role Spec", use_container_width=True)
-with role_spec_reset_col:
-    reset_role_spec_clicked = st.button("Reset Role Spec To Default", use_container_width=True)
-
-if parse_role_spec_clicked:
-    try:
-        parsed_role_spec = parse_role_spec_text(
-            text=st.session_state["ppp_role_spec_source_text"],
-            client=ClaudeClient(api_key=settings.anthropic_api_key),
-            model=DEFAULT_MODEL,
+    download_col_one, download_col_two, download_col_three = st.columns(3)
+    with download_col_one:
+        st.download_button(
+            label="Download output.json",
+            data=st.session_state["ppp_output_json"],
+            file_name="output.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_output_json",
+            on_click="ignore",
         )
-    except ValueError as exc:
-        st.error(str(exc))
-    else:
-        st.session_state["ppp_role_spec_text"] = dump_role_spec_json(parsed_role_spec)
-        st.success("Role specification parsed into structured JSON.")
+    with download_col_two:
+        if st.session_state["ppp_run_report_json"] is not None:
+            st.download_button(
+                label="Download run_report.json",
+                data=st.session_state["ppp_run_report_json"],
+                file_name="run_report.json",
+                mime="application/json",
+                use_container_width=True,
+                key="download_run_report_top",
+                on_click="ignore",
+            )
+    with download_col_three:
+        if st.session_state["ppp_qa_report_json"] is not None:
+            st.download_button(
+                label="Download qa_report.json",
+                data=st.session_state["ppp_qa_report_json"],
+                file_name="qa_report.json",
+                mime="application/json",
+                use_container_width=True,
+                key="download_qa_report_top",
+                on_click="ignore",
+            )
 
-if reset_role_spec_clicked:
-    st.session_state["ppp_role_spec_text"] = dump_role_spec_json(load_role_spec_file(DEFAULT_ROLE_SPEC))
-    st.session_state["ppp_role_spec_source_text"] = ""
+    render_output_preview(st.session_state["ppp_output"])
 
-st.markdown("## Candidate CSV")
-st.caption(
-    f"Uploaded CSVs are saved to `{DEFAULT_PATHS.display(DEFAULT_UPLOADED_CSV)}` and the generated bundle is written to "
-    f"`{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH)}` with QA artifacts in `{DEFAULT_PATHS.display(DEFAULT_INTERMEDIATE_DIR)}`."
-)
-uploaded_csv = st.file_uploader("Upload candidate CSV", type=["csv"])
+st.markdown("## Generate the final output bundle" if not has_output else "## Run the task again")
+run_panel = st.container(border=True)
+with run_panel:
+    primary_left, primary_right = st.columns(2)
+    with primary_left:
+        api_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            key="ppp_anthropic_api_key",
+            help="Required for the Claude steps in the pipeline.",
+        )
+        research_mode_label = st.radio(
+            "Mode",
+            options=list(RESEARCH_MODE_OPTIONS.keys()),
+            index=0 if DEFAULT_RESEARCH_MODE == "fixture" else 1,
+            help="Fixture mode is the safest path for a submission demo.",
+        )
+        selected_research_mode = RESEARCH_MODE_OPTIONS[research_mode_label]
+        st.caption("Fixture mode is sufficient to review the workflow and output quality. Live mode uses changing public evidence, so results may vary over time.")
+    with primary_right:
+        if selected_research_mode == "live":
+            tavily_api_key = st.text_input(
+                "TAVILY_API_KEY",
+                type="password",
+                key="ppp_tavily_api_key",
+                help="Only required for live mode.",
+            )
+            st.caption("Only required for live mode. Live output may vary with public-source coverage and search-provider availability.")
+        else:
+            tavily_api_key = st.session_state["ppp_tavily_api_key"]
+        uploaded_csv = st.file_uploader("Upload candidate CSV", type=["csv"])
+        st.caption(
+            f"Uploaded CSVs are saved to `{DEFAULT_PATHS.display(DEFAULT_UPLOADED_CSV)}`. "
+            f"The generated bundle is written to `{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH)}`."
+        )
 
-generate_clicked = st.button("🚀 Generate Briefings", type="primary", use_container_width=True)
+    st.caption("This will generate the final candidate briefing bundle (`output.json`).")
+    generate_clicked = st.button("Generate output bundle (output.json)", use_container_width=True)
+
+inject_api_key(api_key)
+inject_tavily_api_key(tavily_api_key)
 
 if generate_clicked:
     if not api_key.strip():
-        st.error("Please enter an Anthropic API Key in the sidebar.")
+        st.error("Please enter an Anthropic API Key.")
     elif selected_research_mode == "live" and not tavily_api_key.strip():
-        st.error("Please enter a TAVILY_API_KEY in the sidebar when using Live API mode.")
+        st.error("Please enter a TAVILY_API_KEY when using Live API mode.")
     elif uploaded_csv is None:
         st.error("Please upload a CSV file before generating briefings.")
     else:
@@ -386,9 +500,9 @@ if generate_clicked:
             st.stop()
 
         spinner_text = (
-            "🌐 Connecting to Live API and researching candidates (This may take a minute)..."
+            "Connecting to live research and generating the briefings..."
             if selected_research_mode == "live"
-            else "⚡ Running in fast fixture mode..."
+            else "Running in fixture mode..."
         )
         with st.spinner(spinner_text):
             temp_csv_path = save_uploaded_csv(uploaded_csv, DEFAULT_UPLOADED_CSV.parent)
@@ -413,28 +527,70 @@ if generate_clicked:
             else:
                 output_json = json.dumps(result.output.model_dump(mode="json"), ensure_ascii=False, indent=2)
                 run_report_json = json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2)
+                qa_report_json = _read_artifact_text(result.qa_report_path) or _read_artifact_text(
+                    str(DEFAULT_INTERMEDIATE_DIR / "qa_report.json")
+                )
                 st.session_state["ppp_run_result"] = result
                 st.session_state["ppp_output"] = result.output
                 st.session_state["ppp_output_json"] = output_json
                 st.session_state["ppp_run_report_json"] = run_report_json
-                if result.delivery_status == "success":
-                    st.success(f"Generated {len(result.candidates)} candidate briefings.")
-                else:
-                    st.warning(
-                        f"Generated {result.successful_candidate_count} candidate briefings; "
-                        f"{result.failed_candidate_count} candidate(s) need review."
-                    )
-                st.caption(f"Saved output: `{DEFAULT_PATHS.display(DEFAULT_OUTPUT_PATH)}`")
-                st.caption(f"Saved QA / run artifacts: `{DEFAULT_PATHS.display(DEFAULT_INTERMEDIATE_DIR)}`")
-                st.caption(f"Saved role spec: `{DEFAULT_PATHS.display(role_spec_path)}`")
+                st.session_state["ppp_qa_report_json"] = qa_report_json
+                st.session_state["ppp_last_saved_role_spec"] = DEFAULT_PATHS.display(role_spec_path)
+                st.rerun()
 
-if st.session_state["ppp_output"] is not None and st.session_state["ppp_output_json"] is not None:
-    if st.session_state["ppp_run_result"] is not None:
+with st.expander("Advanced: role specification override", expanded=False):
+    st.caption(
+        f"The app loads the default role specification from `{DEFAULT_PATHS.display(DEFAULT_ROLE_SPEC)}`. "
+        "You can leave this as-is, paste a different brief to parse, or edit the JSON directly."
+    )
+    role_spec_text_col, role_spec_json_col = st.columns(2)
+    with role_spec_text_col:
+        st.text_area(
+            "Role specification text (optional)",
+            key="ppp_role_spec_source_text",
+            height=260,
+            placeholder="Paste a hiring brief or role description here, then click Parse Role Spec.",
+        )
+    with role_spec_json_col:
+        st.text_area(
+            "Structured role specification JSON",
+            key="ppp_role_spec_text",
+            height=260,
+        )
+
+    role_spec_action_col, role_spec_reset_col = st.columns(2)
+    with role_spec_action_col:
+        parse_role_spec_clicked = st.button("Parse Role Spec", use_container_width=True)
+    with role_spec_reset_col:
+        reset_role_spec_clicked = st.button("Reset Role Spec To Default", use_container_width=True)
+
+if parse_role_spec_clicked:
+    try:
+        parsed_role_spec = parse_role_spec_text(
+            text=st.session_state["ppp_role_spec_source_text"],
+            client=ClaudeClient(api_key=settings.anthropic_api_key),
+            model=DEFAULT_MODEL,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+    else:
+        st.session_state["ppp_role_spec_text"] = dump_role_spec_json(parsed_role_spec)
+        st.success("Role specification parsed into structured JSON.")
+
+if reset_role_spec_clicked:
+    st.session_state["ppp_role_spec_text"] = dump_role_spec_json(load_role_spec_file(DEFAULT_ROLE_SPEC))
+    st.session_state["ppp_role_spec_source_text"] = ""
+
+if has_output and st.session_state["ppp_run_result"] is not None:
+    with st.expander("Advanced: QA and run diagnostics", expanded=False):
         render_run_report(
             result=st.session_state["ppp_run_result"],
             run_report_json=st.session_state["ppp_run_report_json"],
+            qa_report_json=st.session_state["ppp_qa_report_json"],
         )
-    render_results(
-        output=st.session_state["ppp_output"],
-        output_json=st.session_state["ppp_output_json"],
-    )
+    with st.expander("Advanced: additional candidate diagnostics", expanded=False):
+        render_candidate_diagnostics(
+            output=st.session_state["ppp_output"],
+        )
+    with st.expander("Advanced: view raw JSON", expanded=False):
+        st.code(st.session_state["ppp_output_json"], language="json")

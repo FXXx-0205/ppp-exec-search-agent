@@ -1,8 +1,10 @@
 # PPP Executive-Search Briefing Agent
 
-Claude-powered candidate-briefing workflow for the Platinum Pacific Partners practical task.
+This repository is my submission for the Platinum Pacific Partners practical task.
 
-The repository is built around the actual PPP deliverable: take a five-row `candidates.csv`, enrich each profile with structured public-profile evidence, and export a recruiter-usable `output.json` with exactly five PPP-schema candidate briefs. The writing is tuned for executive-search judgment rather than generic summarisation, so the output is designed to help a consultant distinguish shortlist-style targets, adjacent screens, and mapping leads while staying inside public-evidence boundaries.
+I treated the task as an executive-search workflow, not as a generic “AI recruiter” exercise. The job here is to take a five-row `candidates.csv`, turn imperfect public-profile evidence into something usable, and export an `output.json` that a consultant could actually review. The output is meant to help with real search judgment: who looks shortlist-worthy, who is worth a screen, and who should stay in the market map, while still being honest about what public evidence does and does not support.
+
+For review purposes, the fixture-backed path is the canonical submission path. It is the reproducible way to run the project, and the committed `data/ppp/output.json` should be treated as the primary artifact for evaluation. Live mode is still included because the task calls for a real Claude tool and a real public-research-capable workflow, but live results can vary as public sources and search-provider coverage change.
 
 ## What This Submission Does
 
@@ -37,9 +39,11 @@ Optional for live public-web research:
 export TAVILY_API_KEY=your_tavily_key_here
 ```
 
+Live mode is optional. It demonstrates the public-web research path, but it is not the canonical submission path because external evidence can change even when the code and prompts do not.
+
 ### Reproducible PPP Run
 
-This is the main command for a reproducible run using the included research fixtures plus live Claude generation:
+This is the main command for the reproducible submission path. It uses the included research fixtures, keeps the review path stable, and reproduces the output shape PPP is evaluating:
 
 ```bash
 python3 scripts/run_ppp_task.py \
@@ -77,11 +81,13 @@ By default, the UI:
 - saves uploaded CSVs to `data/ppp/uploaded_candidates.csv`
 - writes the exported briefing bundle to `data/ppp/output.json`
 - writes QA and run artifacts to `data/ppp/intermediate/`
-- uses fixture mode as the safest demo path unless the user deliberately switches to live public-web research
+- uses fixture mode as the safest path for submission review and demo use
+
+The committed `data/ppp/output.json` remains the correct artifact to review because it comes from this reproducible path. Live mode uses the same interface and schema guarantees, but the available public evidence may vary over time.
 
 ## Architecture
 
-The pipeline is intentionally narrow and acceptance-driven.
+The pipeline is intentionally narrow. I preferred a smaller, clearer flow that matches the PPP acceptance criteria over a more ambitious agent design.
 
 ### 1. Research and Evidence Normalisation
 
@@ -93,7 +99,9 @@ The system first builds a candidate research package from fixture or live public
 - the tool result is returned as a `tool_result`
 - Claude completes the research phase by returning a normalized evidence object
 
-This phase does not produce the final candidate brief. Its job is to stabilize evidence quality and confidence handling before writing.
+I kept this phase separate because I did not want research, confidence handling, and final writing to collapse into one prompt. The purpose of this step is to stabilize evidence before any recruiter-style synthesis happens.
+
+In practice, that gives the repository two honest operating modes: a fixture-backed path for stable submission review and a live public-web path for external enrichment. Both use the same two-step architecture and the same schema contract. The difference is that live research depends on changing external evidence.
 
 ### 2. Final Candidate Brief Generation
 
@@ -105,6 +113,7 @@ The second Claude call does not expose tools. It takes:
 - role spec
 
 and returns exactly one `CandidateBrief` JSON object. This separation keeps enrichment, judgment, and strict formatting from bleeding into one another.
+That trade-off made the system less flashy, but more reliable.
 
 ### 3. Validation and QA
 
@@ -114,7 +123,7 @@ Before export, the system performs:
 - strict PPP schema validation
 - bundle-level QA for quality, repetition, and evidence discipline
 
-If the bundle is malformed, export is blocked. Bundle-level QA also flags repetition and evidence-discipline issues before submission.
+If the bundle is malformed, export is blocked. Bundle-level QA also flags repetition and evidence-discipline issues before submission so the final artifact is not just valid JSON, but a more coherent briefing set.
 
 ## Output Contract
 
@@ -149,7 +158,7 @@ Schema rules that are enforced in code:
 
 ## Evidence and Confidence Handling
 
-The system is designed for imperfect public inputs. It does not assume every candidate row can be verified cleanly.
+The system assumes public evidence will be uneven. I did not want low-confidence profiles to read with the same certainty as cleanly matched ones.
 
 Internally, evidence is normalized into confidence-aware states that drive how the writing behaves. In practice:
 
@@ -192,15 +201,17 @@ The current checked bundle reports:
 - `run_report.json`: 5 successful candidates, 0 failures
 - `qa_report.json`: `passed: true`
 
+For PPP review, `data/ppp/output.json` is still the main file to inspect. The intermediate artifacts support QA and traceability, but they do not replace the final deliverable.
+
 ## Known Limitations
 
-- Public evidence is uneven. The system can frame likely remit shape and firm context, but it does not claim hidden data such as exact team size, direct reports, or move intent unless that is actually supported.
-- `firm_aum_context` is usually qualitative rather than numeric. That is intentional when exact AUM cannot be defended safely from the available evidence.
-- The recruiter scoring and phrasing are calibrated for this PPP brief, not for every search mandate.
-- Fixture mode is the most reproducible path. Live web research can add evidence, but results depend on external provider availability and public-profile coverage.
+- Public evidence is uneven. The system can frame likely remit shape and firm context, but it should not be read as knowing hidden details such as exact team size, direct reports, or move intent unless those are actually supported.
+- `firm_aum_context` is usually qualitative rather than numeric. That is deliberate when exact AUM cannot be defended from the available evidence.
+- The scoring and phrasing are tuned for this PPP brief, not as a universal executive-search scoring model.
+- Fixture mode is the most reproducible path and the recommended submission path. Live web research can add evidence, but results may vary with external provider availability, public-profile coverage, and changing source material. That variability does not change the schema guarantees or the runnable interface; it only changes what evidence is available to the research step at that moment.
 
 ## What I Would Build Next For PPP
 
 - A citation-aware reviewer layer so consultants can see which public signal supports each sentence in the brief.
-- A mandate-specific triage mode that ranks longlists into immediate call priority, adjacent screen, and mapping-only lanes.
-- A tighter consultant feedback loop so PPP recruiters can mark a brief as helpful, too cautious, or misleading and feed that back into prompt and QA calibration.
+- A mandate-specific triage mode that helps split longlists into immediate call priority, adjacent screen, and mapping-only lanes.
+- A tighter consultant feedback loop so PPP recruiters can mark a brief as helpful, too cautious, or misleading and improve future calibration.
