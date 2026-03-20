@@ -2,24 +2,7 @@
 
 This repository is my submission for the Platinum Pacific Partners practical task.
 
-I approached it as a small internal search-execution tool, not as a generic “AI recruiter” demo. The job is to take a five-row `candidates.csv`, normalize uneven public evidence with real Claude tool use, and produce an `output.json` that helps a consultant decide who belongs in the first-call group, who deserves an adjacent screen, and who should stay in the market map without overstating what the evidence can support.
-
-For review purposes, the fixture-backed path is the canonical submission-review path. The committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is the primary artifact for evaluation and represents the promoted best fixture-backed submission artifact. Live mode is still included because the task calls for a real Claude tool and a real public-research-capable workflow, but live results can vary as public sources and search-provider coverage change.
-
-## What This Submission Does
-
-- Accepts the PPP candidate CSV format with exactly 5 candidates.
-- Uses the Anthropic Claude API with real API-level tool calling.
-- Follows a two-step generation pattern:
-  1. research and evidence normalisation through Claude tool use
-  2. final strict CandidateBrief generation with no tools exposed
-- Validates the final bundle against the PPP output schema before export.
-- Exports `data/ppp/output.json` as the primary submission artifact.
-- Produces QA and run artifacts in `data/ppp/intermediate/`.
-
-## Run It
-
-### Setup
+## Quick Start 
 
 ```bash
 python3 -m venv .venv
@@ -27,23 +10,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Set the Anthropic key:
-
 ```bash
 export ANTHROPIC_API_KEY=your_key_here
 ```
-
-Optional for live public-web research:
-
-```bash
-export TAVILY_API_KEY=your_tavily_key_here
-```
-
-Live mode is optional. It demonstrates the public-web research path, but it is not the canonical submission-review path because external evidence can change even when the code and prompts do not.
-
-### Reproducible PPP Run
-
-This is the main command for the recommended submission-review path. It uses the included research fixtures, keeps the review path stable, and reproduces the output shape PPP is evaluating:
 
 ```bash
 python3 scripts/run_ppp_task.py \
@@ -55,8 +24,51 @@ python3 scripts/run_ppp_task.py \
   --intermediate-dir data/ppp/intermediate \
   --model claude-sonnet-4-5
 ```
+## Non-Technical UI
 
-### Validate Existing Output
+For a reviewer who prefers a UI:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+The Streamlit app uses the same pipeline and writes the same structured outputs:
+
+- `data/ppp/output.json`
+- `data/ppp/intermediate/qa_report.json`
+- `data/ppp/intermediate/run_report.json`
+
+## What This Does
+
+- Turns a five-candidate PPP input list into a call-priority output for consultant review.
+- Produces structured `output.json` rather than free-form summaries.
+- Uses evidence-aware judgment so verified, adjacent, and low-confidence cases are handled differently.
+- Separates shortlist, screen, and mapping value without changing the recruiter workflow.
+- Writes QA and run artifacts alongside the final export.
+
+## Example Outcome
+
+After running the pipeline, a consultant does not get five similar summaries.
+
+They get:
+- a clear call order (who to call first, second, third)
+- explicit differences between candidates (not just tone, but prioritisation)
+- a starting point for screening conversations (what to test, what is unclear)
+
+This turns the output from a reading task into a decision-making tool.
+
+## How To Read The Output
+
+- `role_fit.score` is designed to reflect call priority, not just generic candidate quality.
+- Score differences are intentional: they help show who should get the first call, who belongs in the next screening wave, and who is mainly map value.
+- The output is built for recruiter decision-making under uncertainty, not for producing polished profile summaries.
+- The goal is not to eliminate judgment, but to make it faster and more consistent.
+
+## Recommended Review Path
+
+The fixture-backed path is the canonical review path. It keeps the evidence pack stable and makes the generated bundle easier to assess fairly. The committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is the primary artifact to inspect.
+
+To validate an existing export without regenerating it:
 
 ```bash
 python3 scripts/run_ppp_task.py \
@@ -66,165 +78,57 @@ python3 scripts/run_ppp_task.py \
   --validate-only
 ```
 
-### Non-Technical UI
+## Fixture vs Live
 
-For a non-technical user path, the repo also includes a Streamlit wrapper around the same pipeline:
-
-```bash
-streamlit run streamlit_app.py
-```
-
-The UI does not reimplement the business logic. It calls the same PPP pipeline and still writes the same structured `output.json`.
-
-By default, the UI:
-
-- saves uploaded CSVs to `data/ppp/uploaded_candidates.csv`
-- writes the exported briefing bundle to `data/ppp/output.json`
-- writes QA and run artifacts to `data/ppp/intermediate/`
-- uses fixture mode as the safest path for submission review and demo use
-
-The committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) remains the correct artifact to review because it is the promoted best fixture-backed output. Re-running fixture mode uses the same inputs, research fixtures, schema checks, and QA path, but the final briefs are still model-generated, so wording may vary slightly between runs. Live mode uses the same interface and schema guarantees, but the available public evidence may vary over time.
+Fixture mode is recommended for submission review because it is reproducible and keeps the evidence pack stable. Live mode is also supported for real public-web research, but results can vary as source coverage changes. If you want live enrichment, set `TAVILY_API_KEY` and switch `--research-mode live`.
 
 ## Architecture
 
-The pipeline is intentionally narrow. I preferred a smaller, clearer flow that matches the PPP acceptance criteria over a more ambitious agent design.
+The architecture is intentionally narrow to keep the workflow clear and reviewable:
 
-### 1. Research and Evidence Normalisation
+1. mandate-aware evidence normalization
+2. candidate brief generation into strict PPP JSON
+3. QA and schema validation before export
 
-The system first builds a candidate research package from fixture or live public-web lookup. Claude is then called with a real Anthropic tool:
-
-- `messages.create(..., tools=[...])`
-- Claude is instructed to call `normalize_candidate_evidence`
-- Python executes the tool
-- the tool result is returned as a `tool_result`
-- Claude completes the research phase by returning a normalized evidence object
-
-I kept this phase separate because I did not want research, confidence handling, and final writing to collapse into one prompt. The purpose of this step is to stabilize evidence before any recruiter-style synthesis happens.
-
-In practice, that gives the repository two honest operating modes: a fixture-backed path for stable submission review and a live public-web path for external enrichment. Both use the same two-step architecture and the same schema contract. The fixture-backed path is the recommended review path because it keeps the evidence pack stable and schema-safe, even though the final brief wording may still vary slightly across runs. The live path is intentionally more variable because it depends on changing external evidence.
-
-### Why The Tool Step Matters
-
-The tool step is there to improve judgment quality, not just to satisfy the assignment requirement. Without the normalization pass, several candidates would collapse into the same generic note shape: senior distribution title, plausible relevance, uncertain scope, worth a call. The tool-assisted research phase makes the differences more usable by separating profile confidence, remit shape, channel orientation, and chronology quality before the final shortlist note is written.
-
-That matters commercially. It is the difference between:
-
-- a bundle of five similar summaries
-- a slate that separates first-wave calls from calibration screens and mapping-only names
-
-In other words, the tool is doing workflow work. It is not decorative infrastructure around the final JSON.
-
-### 2. Final Candidate Brief Generation
-
-The second Claude call does not expose tools. It takes:
-
-- candidate identity
-- normalized evidence
-- recruiter signals
-- role spec
-
-and returns exactly one `CandidateBrief` JSON object. This separation keeps enrichment, judgment, and strict formatting from bleeding into one another.
-That trade-off made the system less flashy, but more reliable.
-
-### 3. Validation and QA
-
-Before export, the system performs:
-
-- candidate-level parsing and validation
-- strict PPP schema validation
-- bundle-level QA for quality, repetition, and evidence discipline
-
-If the bundle is malformed, export is blocked. Bundle-level QA also flags repetition and evidence-discipline issues before submission so the final artifact is not just valid JSON, but a more coherent briefing set.
+The system uses real Claude tool calling, but the important business point is not the API mechanics. The purpose of the architecture is to stabilize uneven public evidence before writing recruiter-facing output, so consultants get a more consistent call-priority artifact rather than five loosely comparable summaries.
 
 ## Output Contract
 
-`data/ppp/output.json` is the primary deliverable and the canonical submission artifact.
+`data/ppp/output.json` is the main deliverable. It contains:
 
-It contains:
-
-- a top-level `candidates` array
-- exactly 5 candidate objects
+- exactly 5 candidates
 - only the PPP-required fields
+- integer scores in schema-safe ranges
+- structured recruiter-facing fields such as `career_narrative`, `role_fit`, and `outreach_hook`
 
-Each candidate includes:
+## Evidence, Auditability, and QA
 
-- `candidate_id`
-- `full_name`
-- `current_role`
-- `career_narrative`
-- `experience_tags`
-- `firm_aum_context`
-- `mobility_signal`
-- `role_fit`
-- `outreach_hook`
+The pipeline is designed to be conservative with public evidence:
 
-Schema rules that are enforced in code:
+- evidence is normalized before final writing
+- confidence states affect tone and score calibration
+- lower-confidence cases are written more cautiously
+- schema validation and QA run before export
+- fixture-backed mode makes runs reproducible for review
 
-- exactly 5 candidates, not fewer and not more
-- `current_role.tenure_years` is always numeric
-- `mobility_signal.score` is an integer from 1 to 5
-- `role_fit.score` is an integer from 1 to 10
-- extra fields are rejected
-- missing required fields are rejected
+That audit trail is part of the product value. The JSON output is not just an export format; it is a review artifact that makes uncertainty handling visible.
 
-## Evidence and Confidence Handling
+## Why This Is Useful For PPP
 
-The system assumes public evidence will be uneven. I did not want low-confidence profiles to read with the same certainty as cleanly matched ones.
-
-Internally, evidence is normalized into confidence-aware states that drive how the writing behaves. In practice:
-
-- strong or likely matches can be written more directly
-- adjacent but imperfectly supported profiles can still be screened when the commercial shape is relevant
-- low-confidence identity cases are treated conservatively
-
-That shows up in the exported output in a few concrete ways:
-
-- `current_role.tenure_years` is always numeric for schema compliance
-- low-confidence identity cases use conservative tenure handling, including `0.0` where current-role chronology is not reliable enough to trust
-- mobility wording does not overclaim move readiness when chronology or identity is weak
-- `firm_aum_context` prioritises useful qualitative firm framing over empty AUM disclaimers
-- `role_fit.justification` is written to support recruiter prioritisation, not just résumé paraphrase
-
-## Current Output Style
-
-The current output is tuned to help a PPP consultant answer:
-
-- who looks like a first-wave shortlist target
-- who is an adjacent screen worth testing
-- who is mainly a market-map lead
-- what the main fit is
-- what the main gap is
-- what should be tested first on a call
-
-The final artifact therefore aims to read like a recruiter note, not like a generic LLM summary.
-
-If productised further for PPP, the immediate week-one unlock would be faster mandate triage: consultants could move from raw names to call-priority, adjacent-screen, and map-only lanes with a tighter audit trail around what the public evidence actually supports.
+This tool does not ask consultants to change how they work. It compresses the existing workflow: less time on first-pass research, less effort comparing uneven profiles, and more consistency in deciding who should get the next call. Judgment remains with the consultant, but the evidence is shaped into a more usable starting point.
 
 ## Intermediate Artifacts
 
-Useful generated files include:
+Useful files include:
 
-- `data/ppp/output.json`
-- `data/ppp/intermediate/qa_report.json`
-- `data/ppp/intermediate/run_report.json`
+- [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json)
+- [data/ppp/intermediate/qa_report.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/intermediate/qa_report.json)
+- [data/ppp/intermediate/run_report.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/intermediate/run_report.json)
 - `data/ppp/intermediate/candidate_*_enriched.json`
-
-The current checked bundle reports:
-
-- `run_report.json`: 5 successful candidates, 0 failures
-- `qa_report.json`: `passed: true`
-
-For PPP review, [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is the main file to inspect. It is the promoted best fixture-backed artifact selected because it gave the strongest submission-safe balance of recruiter usefulness, evidence discipline, and QA cleanliness. The intermediate artifacts support QA and traceability, but they do not replace the final deliverable.
 
 ## Known Limitations
 
-- Public evidence is uneven. The system can frame likely remit shape and firm context, but it should not be read as knowing hidden details such as exact team size, direct reports, or move intent unless those are actually supported.
-- `firm_aum_context` is usually qualitative rather than numeric. That is deliberate when exact AUM cannot be defended from the available evidence.
-- The scoring and phrasing are tuned for this PPP brief, not as a universal executive-search scoring model.
-- Fixture mode is the recommended submission-review path because it keeps the evidence pack, schema checks, and QA path stable. The final candidate briefs are still model-generated, so wording may vary slightly between fixture-backed runs; the committed [data/ppp/output.json](/Users/fangxixix/CursorProject/ppp-exec-search-agent/data/ppp/output.json) is therefore the canonical artifact to inspect. Live web research can add evidence, but results are inherently more variable because provider availability, public-profile coverage, and source material can change over time.
-
-## What I Would Build Next For PPP
-
-- A citation-aware reviewer layer so consultants can see which public signal supports each sentence in the brief.
-- A mandate-specific triage mode that helps split longlists into immediate call priority, adjacent screen, and mapping-only lanes.
-- A tighter consultant feedback loop so PPP recruiters can mark a brief as helpful, too cautious, or misleading and improve future calibration.
+- Public evidence remains uneven, so some remit details still need live validation on a call.
+- Exact AUM is often treated qualitatively rather than forced into weak numeric claims.
+- The scoring logic is tuned for this PPP brief, not as a universal executive-search model.
+- Even fixture-backed runs can vary slightly in phrasing because the final briefs are model-generated.
