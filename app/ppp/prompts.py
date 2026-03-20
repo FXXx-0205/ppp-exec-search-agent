@@ -57,14 +57,9 @@ def build_final_brief_system_prompt() -> str:
         "Do not use tools. Do not return wrapper objects, instructions, contracts, reasoning, schema commentary, or markdown. "
         "Use the normalized evidence object as the primary evidence contract. "
         "Be decisive but evidence-bounded: identify lane, seniority, why worth calling or not, the main fit, the main gap, and the first thing to test on a call. "
-        "Differentiate clearly between first-wave shortlist targets, credible adjacent screens, and mapping leads. "
-        "Write like internal decision support for a consultant choosing who to call now, not like a cautious system note. "
-        "Start the career_narrative with a decisive recruiter stance first, then place any uncertainty after that stance. "
+        "Differentiate clearly between shortlist-style targets, adjacent screens, and mapping leads. "
         "Do not flatten scores around the mid-point by default. "
         "State one strongest fit factor and one main test or gap per candidate, and keep uncertainty concise and specific rather than generic. "
-        "Include one explicit slate-relative signal in role_fit.justification so the candidate is positioned against the rest of the bundle. "
-        "Make the decision explicit: immediate call, calibration-style screening call, or mapping-only outreach. "
-        "Use mobility_signal.rationale to explain the practical outreach posture implied by the evidence, while still avoiding any claim that tenure alone proves move readiness. "
         "Avoid reusing the same structural phrasing across every candidate note."
     )
 
@@ -103,25 +98,8 @@ def build_final_brief_user_prompt(
             "role_fit.role": ROLE_NAME,
             "tenure_years_rule": "must be numeric; use normalized_evidence.tenure_years exactly",
             "recruiter_calibration": (
-                "Make the priority legible: first-wave shortlist target vs credible adjacent screen vs mapping lead. "
-                "Avoid giving near-identical role_fit scores unless the evidence truly supports it. "
-                "Use the actual bundle context to make the candidate feel relatively prioritised, not just described in isolation."
-            ),
-            "role_fit.justification_additional_rule": (
-                "Sentence 1 should make a clear decision call and position the candidate in the slate. "
-                "Sentence 2 should explain the main gap or diligence issue. "
-                "Sentence 3 should state the first screening question."
-            ),
-            "mobility_signal_additional_rule": (
-                "Sentence 1 should describe the chronology signal. "
-                "Sentence 2 should say there is no evidence of move intent and then explain the recruiter outreach posture implied by the evidence, without inferring move readiness from tenure alone."
-            ),
-            "career_narrative_additional_rule": (
-                "Sentence 1 must open with a decisive recruiter stance. "
-                "Include one natural sentence answering whether this person justifies a call this week."
-            ),
-            "outreach_hook_additional_rule": (
-                "Make the hook sound like real consultant outreach: why this person, why now, and whether a quick call this week is justified."
+                "Make the priority legible: shortlist-style target vs adjacent screen vs mapping lead. "
+                "Avoid giving near-identical role_fit scores unless the evidence truly supports it."
             ),
         },
         "required_output_shape": {

@@ -821,11 +821,11 @@ def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
     # readiness wording aligned in the final exported artifact.
     if match_state == "no_reliable_match":
         sentence_one = trajectory or "Public chronology could not be validated against a reliable current-profile match."
-        sentence_two = _mobility_follow_up_sentence(enrichment=enrichment, match_state=match_state)
+        sentence_two = _mobility_follow_up_sentence(match_state=match_state)
         return polish_join(sentence_one, sentence_two)
     if match_state in {"likely_match", "partial_match"} and enrichment.inferred_tenure_years is None:
         sentence_one = trajectory or "Public chronology is only partially established, so current-role tenure should be treated as directional rather than locked."
-        sentence_two = _mobility_follow_up_sentence(enrichment=enrichment, match_state=match_state)
+        sentence_two = _mobility_follow_up_sentence(match_state=match_state)
         return polish_join(sentence_one, sentence_two)
     tenure = enrichment.inferred_tenure_years
     if tenure is not None:
@@ -834,7 +834,7 @@ def _safe_mobility_rationale(enrichment: CandidateEnrichmentResult) -> str:
         sentence_one = "Fixture-backed run did not provide public chronology for the current role."
     else:
         sentence_one = "Live public-web research did not clearly establish public chronology for the current role."
-    sentence_two = _mobility_follow_up_sentence(enrichment=enrichment, match_state=match_state)
+    sentence_two = _mobility_follow_up_sentence(match_state=match_state)
     return polish_join(sentence_one, sentence_two)
 
 
@@ -892,16 +892,16 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
     bucket = _priority_bucket(enrichment=enrichment)
     if match_state == "no_reliable_match":
         exploratory_bucket = [
-            f"Hi {first_name}, we're mapping a distribution brief and your remit at {employer} looks directionally relevant around {angle}, but we would need to confirm profile accuracy before deciding whether a call this week is warranted.",
-            f"Hi {first_name}, we're keeping a market map around a distribution search and your role at {employer} may overlap with {angle}, so I wanted to verify that before moving to active outreach.",
-            f"Hi {first_name}, one of our distribution briefs has some adjacency to your remit at {employer}, and the immediate question is whether your role really reaches into {angle} strongly enough to justify a live call.",
+            f"Hi {first_name}, we're mapping a distribution brief and wanted to sense-check whether your remit at {employer} genuinely covers {angle}.",
+            f"Hi {first_name}, we're keeping a market map around a distribution search and wanted to confirm whether your role at {employer} really includes {angle}.",
+            f"Hi {first_name}, one of our distribution briefs has some adjacency to your remit at {employer}, and I wanted to check how much it really reaches into {angle}.",
         ]
         return choose_variant(exploratory_bucket, candidate_brief.full_name, employer, angle, "not_verified")
     if bucket == "strong_shortlist":
         shortlist_bucket = [
-            f"Hi {first_name}, we're prioritising a very small shortlist for a senior distribution mandate, and your remit at {employer} looks directly relevant around {angle} so it would be worth a quick call this week.",
-            f"Hi {first_name}, we're moving quickly on a Head of Distribution search and your current remit at {employer} is one of the cleaner matches we have seen, particularly around {angle}; worth a brief call this week?",
-            f"Hi {first_name}, your work at {employer} is one of the stronger overlaps on our shortlist, especially where it touches {angle}, and I think it merits an early conversation this week.",
+            f"Hi {first_name}, we're already prioritising a small shortlist for a senior distribution mandate, and your remit at {employer} looks firmly in range, especially around {angle}; open to a brief conversation?",
+            f"Hi {first_name}, we're moving quickly on a Head of Distribution search and your current remit at {employer} looks close enough to warrant an early call, particularly around {angle}.",
+            f"Hi {first_name}, your work at {employer} reads like one of the more relevant profiles on our distribution shortlist, especially where it touches {angle}; would a quick intro be worthwhile?",
         ]
         return choose_variant(shortlist_bucket, candidate_brief.full_name, employer, angle, "strong_shortlist")
     if bucket == "credible_adjacent_screen":
@@ -913,9 +913,9 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
             ]
             return choose_variant(step_up_bucket, candidate_brief.full_name, employer, angle, "step_up_bucket")
         adjacent_bucket = [
-            f"Hi {first_name}, we're screening a small number of adjacent distribution profiles and your remit at {employer} looks worth pressure-testing now, especially around {angle}.",
-            f"Hi {first_name}, your coverage at {employer} is not a straight title match to our brief, but there is enough overlap around {angle} to justify a calibration call this week.",
-            f"Hi {first_name}, we're speaking with a few screen-tier candidates for a senior distribution role, and your remit at {employer} looks commercially relevant enough around {angle} to warrant a brief call this week.",
+            f"Hi {first_name}, we're screening a handful of adjacent distribution profiles and your remit at {employer} looks worth pressure-testing, especially around {angle}.",
+            f"Hi {first_name}, your coverage at {employer} is not a straight title match to our brief, but there is enough overlap around {angle} to justify a quick screening conversation.",
+            f"Hi {first_name}, we're speaking with a few adjacent candidates for a senior distribution role, and your remit at {employer} looks commercially relevant, especially around {angle}; open to a brief chat?",
         ]
         return choose_variant(adjacent_bucket, candidate_brief.full_name, employer, angle, "credible_adjacent_screen")
     if match_state in {"likely_match", "partial_match"}:
@@ -1232,39 +1232,24 @@ def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnr
     title = _sentence_safe_title(enrichment.current_title)
     employer = enrichment.current_employer
     match_state = enrichment.normalized_evidence().match_confidence_state
-    bucket = _priority_bucket(enrichment=enrichment)
     if match_state == "no_reliable_match":
         variants = [
-            f"This is a mapping name, not an immediate call, because the task input points to {title} at {employer} but the current-profile match remains unreliable in public evidence.",
-            f"This stays in the map rather than the call list because the task input places {candidate_brief.full_name} at {employer} as {title}, but that current-profile link is still not reliable enough to treat as verified.",
-            f"This is not a first-wave name because public evidence does not yet give a reliable current-profile match for {candidate_brief.full_name} as {title} at {employer}.",
+            f"Task input lists {candidate_brief.full_name} as {title} at {employer}, but the current-profile match remains unreliable in public evidence.",
+            f"{candidate_brief.full_name} appears in the task input as {title} at {employer}, although public evidence does not yet give a reliable current-profile match.",
+            f"The task input places {candidate_brief.full_name} at {employer} as {title}, but that current-profile link is still not reliable enough to treat as verified.",
         ]
         return choose_variant(variants, candidate_brief.full_name, employer, title, "career_opening")
     if match_state == "partial_match":
         variants = [
-            f"This is worth a screening call because public search surfaced a partial match for {candidate_brief.full_name} as {title} at {employer}, with {_uncertain_scope_phrase(signals.scope_signal)} and {seniority} visible even though the current-profile link is not fully locked.",
-            f"This earns a calibration-style screen because public search returned a plausible partial match for {candidate_brief.full_name} at {employer} as {title}, though the current-profile link is still only partially confirmed.",
-            f"This is not a de-risked shortlist name, but it is worth screening because {candidate_brief.full_name} looks like a partial public match for {title} at {employer} with enough remit evidence to test.",
+            f"Public search surfaced a partial match for {candidate_brief.full_name} as {title} at {employer}, with {_uncertain_scope_phrase(signals.scope_signal)} and {seniority} visible but not fully locked.",
+            f"Public search returned a plausible partial match for {candidate_brief.full_name} at {employer} as {title}, though the current-profile link is still only partially confirmed.",
+            f"{candidate_brief.full_name} looks like a partial public match for {title} at {employer}, with enough remit evidence to screen but not enough to treat as fully verified.",
         ]
         return choose_variant(variants, candidate_brief.full_name, employer, title, "possible_opening")
-    if bucket == "strong_shortlist":
-        variants = [
-            f"This sits firmly in the shortlist tier because {candidate_brief.full_name} is in a {title} remit at {employer}, with {scope} and {seniority} already visible in public evidence.",
-            f"This is a clear first-call profile because the public record places {candidate_brief.full_name} in the {title} role at {employer}, supported by {scope} and {seniority}.",
-            f"This belongs in the early-call group because {candidate_brief.full_name} brings a {title} remit at {employer}, with public signals already showing {scope} and {seniority}.",
-        ]
-        return choose_variant(variants, candidate_brief.full_name, employer, title, "shortlist_opening")
-    if bucket == "credible_adjacent_screen":
-        variants = [
-            f"This is not a first-wave name, but it is worth screening because {candidate_brief.full_name} brings {title} at {employer}, with {scope} and {seniority} visible in public evidence.",
-            f"This sits in the screening tier rather than the shortlist because {candidate_brief.full_name} brings a {title} remit at {employer} that still shows usable {scope} and {seniority}.",
-            f"This is a credible screening profile because the current remit at {employer} still puts {candidate_brief.full_name} in range on lane and seniority, even if it is not one of the strongest names in the slate.",
-        ]
-        return choose_variant(variants, candidate_brief.full_name, employer, title, "adjacent_opening")
     if match_state == "likely_match":
         variants = [
-            f"This is closer to a screening name than a mapping name because public evidence most likely places {candidate_brief.full_name} in the {title} remit at {employer}, with {_uncertain_scope_phrase(signals.scope_signal)} and {seniority} already visible.",
-            f"This is worth keeping active because public evidence most likely places {candidate_brief.full_name} in the {title} remit at {employer}, even though some scope detail still needs tightening.",
+            f"Public evidence most likely places {candidate_brief.full_name} in the {title} remit at {employer}, with {_uncertain_scope_phrase(signals.scope_signal)} and {seniority} already visible.",
+            f"{candidate_brief.full_name} reads as a likely current {title} at {employer}, with public signals pointing to {_uncertain_scope_phrase(signals.scope_signal)} and {seniority}.",
         ]
         return choose_variant(variants, candidate_brief.full_name, employer, title, "likely_opening")
     if signals.channel_orientation == "unclear":
@@ -1273,12 +1258,12 @@ def _career_opening(*, candidate_brief: CandidateBrief, enrichment: CandidateEnr
                 f"{candidate_brief.full_name} is currently {title} at {employer}. "
                 f"Public evidence does not yet establish a clear distribution lane, and {scope} with {seniority} should be treated cautiously."
             )
-        return f"This stays active because {candidate_brief.full_name} is currently {title} at {employer}, with a broad distribution remit signalled at {scope} and {seniority}."
+        return f"{candidate_brief.full_name} is currently {title} at {employer}, with a broad distribution remit signalled at {scope} and {seniority}."
     if signals.seniority_signal == "head_level":
-        return f"This is an actionable search profile because {candidate_brief.full_name} holds {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} signalled by the title {title}."
+        return f"{candidate_brief.full_name} holds {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} signalled by the title {title}."
     if signals.scope_signal in {"anz", "global", "regional"}:
-        return f"This is worth keeping in the screen set because public evidence places {candidate_brief.full_name} in {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} attached to the remit."
-    return f"This remains in play because the current remit at {employer} is weighted toward {_lane_phrase(signals.channel_orientation)}, with {seniority} and {scope} signalled by the title {title}."
+        return f"Public evidence places {candidate_brief.full_name} in {_lane_phrase(signals.channel_orientation)} at {employer}, with {scope} and {seniority} attached to the remit."
+    return f"The current remit at {employer} appears weighted toward {_lane_phrase(signals.channel_orientation)}, with {seniority} and {scope} signalled by the title {title}."
 
 
 def _career_relevance(*, candidate_brief: CandidateBrief, enrichment: CandidateEnrichmentResult) -> str:
@@ -1290,30 +1275,30 @@ def _career_relevance(*, candidate_brief: CandidateBrief, enrichment: CandidateE
         lane_scope = _join_angle(_lane_label(signals.channel_orientation), _scope_label(signals.scope_signal))
         if lane_scope:
             variants = [
-                f"This does not justify a call this week before stronger shortlist names are tested; the lane still looks commercially relevant on the face of the input, especially around {lane_scope}, but profile certainty has to be fixed first; {sell_points}.",
-                f"This should stay as exploratory mapping rather than active outreach; there is enough lane overlap around {lane_scope} to keep the name warm, but not enough profile certainty yet to treat it as action-ready; {sell_points}.",
+                f"The lane still looks commercially relevant on the face of the input, especially around {lane_scope}, but this should stay as a tentative market map entry until the current-profile match is confirmed; {sell_points}.",
+                f"There is enough lane overlap to keep this as a tentative market map entry, particularly around {lane_scope}, but not enough profile certainty yet to treat it as an action-ready target; {sell_points}.",
             ]
             return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, lane_scope, "not_verified_relevance")
-        return f"This does not justify a call this week; even with the current-profile match still unreliable, the remit is only commercially adjacent enough to keep as a tentative market map entry; {sell_points}."
+        return f"Even with the current-profile match still unreliable, the remit is commercially adjacent enough to keep as a tentative market map entry; {sell_points}."
     if match_state == "partial_match":
         variants = [
-            f"This is worth a calibration call this week because {sell_points}, even though the profile should still be treated as partially matched rather than fully verified.",
-            f"Commercial relevance is strong enough to keep this in the active screen, especially as {sell_points}; this is a screen decision, not a shortlist decision.",
-            f"This is worth screening rather than shelving because {sell_points}; the remit is useful even though the profile match is only partial and the priority still sits behind stronger names.",
+            f"There is enough here to justify a screening call because {sell_points}, even though the profile should still be treated as partially matched rather than fully verified.",
+            f"Commercial relevance is strong enough to keep this in the active screen, especially as {sell_points}, with profile certainty still to be tightened.",
+            f"This is worth screening rather than shelving because {sell_points}; the remit is useful even though the profile match is only partial.",
         ]
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "possible_relevance")
     if bucket == "strong_shortlist":
         variants = [
-            f"This is one of the strongest profiles in this slate and justifies an immediate call because {sell_points}; the diligence now is remit depth rather than basic relevance.",
-            f"This is one of the two profiles in this slate that justifies an immediate call because {sell_points}; the remaining work is to test scope depth, not lane fit.",
-            f"This is a call-now profile because {sell_points}; the real question is how deep the remit runs rather than whether the lane is relevant.",
+            f"This should sit in the early-call shortlist because {sell_points}; the diligence point is remit depth rather than basic relevance.",
+            f"This reads more like a first-wave call than a mapping name because {sell_points}; the remaining work is to test scope depth, not lane fit.",
+            f"This looks actionable for shortlist discussion because {sell_points}; the real question is how deep the remit runs rather than whether the lane is relevant.",
         ]
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "strong_shortlist_relevance")
     if bucket == "credible_adjacent_screen":
         variants = [
-            f"This is worth a calibration call, not a priority outreach, because {sell_points}; the overlap is real, but the transferability still needs pressure-testing.",
-            f"This belongs in the screening tier rather than the shortlist because {sell_points}; there is enough overlap to test, but not enough to assume transferability.",
-            f"This is weaker than the shortlist names but stronger than the mapping leads because {sell_points}, which is enough to justify a screen this week.",
+            f"This is better treated as an adjacent screen than a first-wave shortlist name because {sell_points}; the overlap is real, but the transferability still needs pressure-testing.",
+            f"This belongs in the adjacent-screen bucket rather than the first shortlist cut because {sell_points}; there is enough overlap to test, but not enough to assume transferability.",
+            f"This looks directionally relevant enough for a screening call because {sell_points}, even if it still sits a step away from a clean shortlist profile.",
         ]
         return choose_variant(variants, candidate_brief.full_name, enrichment.current_employer, "adjacent_screen_relevance")
     if match_state == "likely_match":
@@ -1342,59 +1327,24 @@ def _role_fit_strength(*, enrichment: CandidateEnrichmentResult) -> str:
     match_state = enrichment.normalized_evidence().match_confidence_state
     bucket = _priority_bucket(enrichment=enrichment)
     if match_state == "no_reliable_match":
-        return (
-            f"This is a mapping name, not an immediate call; compared with others in this slate, the task input suggests commercially relevant "
-            f"{lane_scope or 'distribution'} exposure at {employer}, but the current-profile match is still unreliable."
-        )
+        return f"Lower-priority mapping lead; the task input suggests commercially relevant {lane_scope or 'distribution'} exposure at {employer}, but the current-profile match is still unreliable."
     if bucket == "strong_shortlist":
-        return (
-            f"This is a first-wave shortlist call because {title} at {employer} is one of the strongest profiles in this slate, "
-            f"sits ahead of the screen-tier names, and brings one of the cleaner overlaps with the brief, especially around "
-            f"{lane_scope or 'distribution'}, and {sell_points}."
-        )
+        return f"Shortlist-style target; {title} at {employer} brings one of the cleaner overlaps with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}."
     if bucket == "credible_adjacent_screen":
-        return (
-            f"This is a credible screening candidate because {title} at {employer} sits behind the two head-of-distribution profiles, "
-            f"but ahead of the mapping leads in this slate, and still brings useful overlap with the brief, especially "
-            f"around {lane_scope or 'distribution'}, and {sell_points}."
-        )
+        return f"Adjacent screen rather than first-wave shortlist; {title} at {employer} brings useful overlap with the brief, especially around {lane_scope or 'distribution'}, and {sell_points}."
     if match_state == "partial_match":
-        return (
-            f"This is a screening name rather than a mapping-only name because {title} at {employer} sits ahead "
-            f"of pure mapping in this slate, may bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}, "
-            f"even though the profile match is only partial."
-        )
+        return f"Worth a screening call; {title} at {employer} may bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}, even though the profile match is only partial."
     if match_state == "likely_match":
-        return (
-            f"This is a credible screening candidate because {title} at {employer} looks closer to "
-            f"screening than mapping in this slate and appears to bring relevant {lane_scope or 'distribution'} exposure, and "
-            f"{sell_points}."
-        )
+        return f"Screen-worthy likely match; {title} at {employer} appears to bring relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if signals.mandate_similarity == "direct_match":
-        return (
-            f"This is a first-wave shortlist call because the current remit at {employer} sits closer to shortlist than mapping in this slate, "
-            f"brings relevant {lane_scope or 'distribution'}, and {sell_points}."
-        )
+        return f"Credible shortlist candidate; current remit at {employer} brings relevant {lane_scope or 'distribution'}, and {sell_points}."
     if signals.mandate_similarity == "adjacent_match":
-        return (
-            f"This is a credible screening candidate because {title} at {employer} is weaker than the shortlist names but stronger than the mapping leads, "
-            f"while still bringing relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
-        )
+        return f"Adjacent but credible target; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if signals.mandate_similarity == "step_up_candidate":
-        return (
-            f"This is a screening candidate rather than a shortlist call because {title} at {employer} is a stretch "
-            f"option in this slate rather than a de-risked shortlist name, even though it brings relevant {lane_scope or 'distribution'} exposure, "
-            f"and {sell_points}."
-        )
+        return f"Adjacent step-up conversation; {title} at {employer} brings relevant {lane_scope or 'distribution'} exposure, and {sell_points}."
     if _is_non_distribution_title(enrichment.current_title.lower()):
-        return (
-            f"This is a mapping name, not an immediate call, because {title} at {employer} points more to "
-            f"investment-platform exposure than to a verified client-facing commercial remit."
-        )
-    return (
-        f"This stays in the screening tier rather than the shortlist because {title} at {employer} stays between "
-        f"active screening and mapping because the distribution relevance is only partially established, although {sell_points}."
-    )
+        return f"Market map only; {title} at {employer} points more to investment-platform exposure than to a verified client-facing commercial remit."
+    return f"Possible match pending verification; {title} at {employer} leaves the distribution relevance only partially established, although {sell_points}."
 
 
 def _priority_bucket(*, enrichment: CandidateEnrichmentResult) -> str:
@@ -1641,38 +1591,31 @@ def _role_gap_sentence(gaps: list[str]) -> str:
     return choose_variant(variants, primary_gap, secondary_gap, "multi_role_gap")
 
 
-def _mobility_follow_up_sentence(*, enrichment: CandidateEnrichmentResult, match_state: str) -> str:
-    bucket = _priority_bucket(enrichment=enrichment)
-    if match_state == "no_reliable_match":
-        variants = [
-            "There is no evidence of move intent, so outreach should stay exploratory until the current remit is confirmed in conversation.",
-            "There is no evidence of move intent, so any outreach should remain exploratory because profile certainty is still the gating issue.",
-            "There is no evidence of move intent, so this should stay exploratory rather than move into active calling until identity and remit are tightened.",
-        ]
-        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, match_state, "mobility_follow_up")
-
-    if bucket == "strong_shortlist":
-        variants = [
-            "There is no evidence of move intent, so outreach should be early-priority and tested in conversation because role relevance is high, not because tenure itself implies readiness.",
-            "There is no evidence of move intent, so this still warrants early-priority outreach because the mandate overlap is already strong and worth testing early.",
-            "There is no evidence of move intent, so outreach should be treated as early-priority on relevance grounds rather than on any assumption that chronology makes the person movable.",
-        ]
-        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, bucket, "mobility_follow_up")
-
-    if bucket == "credible_adjacent_screen":
-        variants = [
-            "There is no evidence of move intent, so outreach should be calibration-style rather than urgent because the fit still needs pressure-testing.",
-            "There is no evidence of move intent, so this is better handled as a calibration call than a priority pull-forward.",
-            "There is no evidence of move intent, so outreach should stay calibration-led rather than timed off chronology alone.",
-        ]
-        return choose_variant(variants, enrichment.full_name, enrichment.current_employer, bucket, "mobility_follow_up")
-
-    variants = [
-        "There is no evidence of move intent, so outreach should stay exploratory until fit or profile certainty improves.",
-        "There is no evidence of move intent, so the practical outreach posture remains exploratory rather than priority-led.",
-        "There is no evidence of move intent, so this should stay in exploratory market mapping rather than move into active calling.",
-    ]
-    return choose_variant(variants, enrichment.full_name, enrichment.current_employer, bucket, "mobility_follow_up")
+def _mobility_follow_up_sentence(*, match_state: str) -> str:
+    variants = {
+        "no_reliable_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, with outreach framed as exploratory rather than timely.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, not inferred from the task input alone.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before any priority call is assumed.",
+        ],
+        "partial_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation, even if the commercial overlap looks usable.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from partial chronology.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation once profile certainty is tightened.",
+        ],
+        "likely_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than assumed from tenure alone.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even where chronology looks directionally solid.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation before call priority is calibrated too tightly.",
+        ],
+        "verified_match": [
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation rather than inferred from a settled remit.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation even though the role chronology is clearer.",
+            "No direct public signal of move readiness is visible, so mobility should be treated as uncertain and checked in follow-up conversation instead of being read off tenure alone.",
+        ],
+    }
+    bucket = variants.get(match_state, variants["likely_match"])
+    return choose_variant(bucket, match_state, "mobility_follow_up")
 
 
 def _soften_role_fit_chain(text: str) -> str:
