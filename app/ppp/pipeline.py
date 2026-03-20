@@ -1165,18 +1165,6 @@ def _safe_outreach_hook(*, candidate_brief: CandidateBrief, enrichment: Candidat
     first_name = _first_name(candidate_brief.full_name)
     match_state = enrichment.normalized_evidence().match_confidence_state
     bucket = _priority_bucket(enrichment=enrichment)
-    primary_gap = _strip_gap_qualifier(enrichment.recruiter_signals.key_gaps[0]) if enrichment.recruiter_signals.key_gaps else "scope depth"
-    hook_gap = primary_gap
-    lowered_angle = angle.lower()
-    lowered_gap = primary_gap.lower()
-    if "team" in lowered_angle and "team leadership scale" in lowered_gap:
-        hook_gap = "role depth"
-    elif "institutional and super-fund coverage" in lowered_angle and "institutional and super-fund" in lowered_gap:
-        hook_gap = "coverage depth"
-    elif "ifa and platform coverage" in lowered_angle and "ifa and platform" in lowered_gap:
-        hook_gap = "coverage depth"
-    elif "broader product set" in lowered_angle and "product breadth" in lowered_gap:
-        hook_gap = "product breadth"
     if match_state == "no_reliable_match":
         exploratory_bucket = [
             f"Hi {first_name}, I may be wrong, but if your current remit at {employer} genuinely includes {angle}, it would be worth a quick calibration chat on a distribution brief.",
